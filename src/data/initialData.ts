@@ -12,6 +12,12 @@ export const DEFAULT_SETTINGS: SystemSettings = {
 };
 
 export const SD_CLASSES = [
+  'Kelas 1',
+  'Kelas 2',
+  'Kelas 3',
+  'Kelas 4',
+  'Kelas 5',
+  'Kelas 6',
   '1-A',
   '1-B',
   '2-A',

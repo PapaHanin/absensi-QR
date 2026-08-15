@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Student, SystemSettings, Teacher } from '../types';
 import { createStudentQRPayload, generateQRCodeDataURL } from '../utils/qr';
+import { isHomeroomClassMatch } from '../utils/classUtils';
 import jsPDF from 'jspdf';
 
 interface BulkCardPrintModalProps {
@@ -53,9 +54,9 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
   const classFilteredStudents = useMemo(() => {
     let list = students;
     if (isWaliKelas && myHomeroom) {
-      list = list.filter((s) => s.classRoom === myHomeroom);
+      list = list.filter((s) => isHomeroomClassMatch(s.classRoom, myHomeroom));
     } else if (selectedClass !== 'Semua') {
-      list = list.filter((s) => s.classRoom === selectedClass);
+      list = list.filter((s) => isHomeroomClassMatch(s.classRoom, selectedClass) || s.classRoom === selectedClass);
     }
 
     if (searchQuery.trim()) {

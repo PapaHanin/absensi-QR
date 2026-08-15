@@ -7,6 +7,7 @@ import { SD_CLASSES } from '../data/initialData';
 import { exportStudentsToCSV, downloadStudentImportTemplateCSV, parseStudentImportCSV } from '../utils/csv';
 import { downloadStudentImportTemplateExcel, parseStudentExcelFile } from '../utils/excel';
 import { formatPhoneNumberForWA } from '../utils/whatsapp';
+import { isHomeroomClassMatch, formatClassLabel } from '../utils/classUtils';
 
 interface StudentsTabProps {
   students: Student[];
@@ -57,7 +58,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
   const canEditStudent = (student: Student) => {
     if (isAdmin) return true;
     if (isWaliKelas && myHomeroom) {
-      return student.classRoom === myHomeroom;
+      return isHomeroomClassMatch(student.classRoom, myHomeroom);
     }
     return false;
   };
@@ -65,7 +66,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
   const canDeleteStudent = (student: Student) => {
     if (isAdmin) return true;
     if (isWaliKelas && myHomeroom) {
-      return student.classRoom === myHomeroom;
+      return isHomeroomClassMatch(student.classRoom, myHomeroom);
     }
     return false;
   };
@@ -125,7 +126,14 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
           std.name.toLowerCase().includes(query) ||
           std.nis.toLowerCase().includes(query) ||
           (std.parentPhone && std.parentPhone.includes(query));
-        const matchClass = effectiveClass === 'Semua' || std.classRoom === effectiveClass;
+
+        let matchClass = true;
+        if (isWaliKelas && myHomeroom) {
+          matchClass = isHomeroomClassMatch(std.classRoom, myHomeroom);
+        } else if (selectedClass !== 'Semua') {
+          matchClass = isHomeroomClassMatch(std.classRoom, selectedClass) || std.classRoom === selectedClass;
+        }
+
         return matchSearch && matchClass;
       })
       .sort((a, b) => {
@@ -139,7 +147,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
         }
         return a.name.localeCompare(b.name);
       });
-  }, [students, searchTerm, effectiveClass, sortBy]);
+  }, [students, searchTerm, isWaliKelas, myHomeroom, selectedClass, sortBy]);
 
   const handleOpenAddForm = () => {
     if (isGuruMapel) {
@@ -147,12 +155,13 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
       return;
     }
     setEditingStudent(null);
+    const initialClass = (isWaliKelas && myHomeroom) ? myHomeroom : (selectedClass !== 'Semua' ? selectedClass : 'Kelas 1');
     setFormData({
       nis: String(1000 + students.length + 1),
       name: '',
-      classRoom: (isWaliKelas && myHomeroom) ? myHomeroom : (selectedClass !== 'Semua' ? selectedClass : '1-A'),
+      classRoom: initialClass,
       gender: 'Laki-laki',
-      parentPhone: '0812' + Math.floor(10000000 + Math.random() * 90000000),
+      parentPhone: '',
       avatarUrl: MALE_BW_AVATAR,
       photo: undefined,
     });
@@ -854,17 +863,26 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Kelas SD <span className="text-rose-500">*</span>
                   </label>
-                  <select
-                    value={formData.classRoom}
-                    onChange={(e) => setFormData({ ...formData, classRoom: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-bold focus:outline-none focus:border-indigo-500 focus:bg-white cursor-pointer"
-                  >
-                    {availableClasses.map((cls) => (
-                      <option key={cls} value={cls}>
-                        Kelas {cls}
-                      </option>
-                    ))}
-                  </select>
+                  {isWaliKelas && myHomeroom ? (
+                    <div className="w-full bg-emerald-50 border border-emerald-300 rounded-xl px-3 py-2 text-xs text-emerald-900 font-bold flex items-center justify-between">
+                      <span>{formatClassLabel(myHomeroom)}</span>
+                      <span className="text-[10px] bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded font-extrabold">
+                        Terkunci Wali Kelas
+                      </span>
+                    </div>
+                  ) : (
+                    <select
+                      value={formData.classRoom}
+                      onChange={(e) => setFormData({ ...formData, classRoom: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-bold focus:outline-none focus:border-indigo-500 focus:bg-white cursor-pointer"
+                    >
+                      {availableClasses.map((cls) => (
+                        <option key={cls} value={cls}>
+                          {formatClassLabel(cls)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               </div>
 

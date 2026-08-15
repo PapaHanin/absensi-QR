@@ -4,6 +4,7 @@ import { exportAttendanceToCSV } from '../utils/csv';
 import { openWhatsAppNotification } from '../utils/whatsapp';
 import { generateAttendancePDFReport } from '../utils/pdf';
 import { AttendanceTrendChart } from './AttendanceTrendChart';
+import { isHomeroomClassMatch, formatClassLabel } from '../utils/classUtils';
 
 interface DashboardTabProps {
   students: Student[];
@@ -33,8 +34,15 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   onAddManualAttendance,
   onDeleteRecord,
 }) => {
+  const isAdmin = currentTeacher?.role === 'admin' || currentTeacher?.teacherType === 'admin';
+  const isWaliKelas = !isAdmin && (currentTeacher?.teacherType === 'wali_kelas' || Boolean(currentTeacher?.homeroomClass));
+  const myHomeroom = currentTeacher?.homeroomClass;
+
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedClass, setSelectedClass] = useState<string>('Semua');
+  const [selectedClass, setSelectedClass] = useState<string>(() => {
+    if (isWaliKelas && myHomeroom) return myHomeroom;
+    return 'Semua';
+  });
   const [selectedStatus, setSelectedStatus] = useState<string>('Semua');
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [exportAlertMessage, setExportAlertMessage] = useState<string | null>(null);
@@ -96,16 +104,24 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
   // Statistics calculation
   const stats = useMemo(() => {
-    const totalStudents = students.length;
-    const hadir = dateFilteredRecords.filter((r) => r.status === 'Hadir').length;
-    const terlambat = dateFilteredRecords.filter((r) => r.status === 'Terlambat').length;
-    const izinSakit = dateFilteredRecords.filter((r) => r.status === 'Izin' || r.status === 'Sakit').length;
-    const alpa = dateFilteredRecords.filter((r) => r.status === 'Alpa').length;
-    const totalRecorded = dateFilteredRecords.length;
+    const relevantStudents = isWaliKelas && myHomeroom
+      ? students.filter((s) => isHomeroomClassMatch(s.classRoom, myHomeroom))
+      : students;
+    const totalStudents = relevantStudents.length;
+
+    const relevantRecords = isWaliKelas && myHomeroom
+      ? dateFilteredRecords.filter((r) => isHomeroomClassMatch(r.classRoom, myHomeroom))
+      : (selectedClass !== 'Semua' ? dateFilteredRecords.filter((r) => isHomeroomClassMatch(r.classRoom, selectedClass) || r.classRoom === selectedClass) : dateFilteredRecords);
+
+    const hadir = relevantRecords.filter((r) => r.status === 'Hadir').length;
+    const terlambat = relevantRecords.filter((r) => r.status === 'Terlambat').length;
+    const izinSakit = relevantRecords.filter((r) => r.status === 'Izin' || r.status === 'Sakit').length;
+    const alpa = relevantRecords.filter((r) => r.status === 'Alpa').length;
+    const totalRecorded = relevantRecords.length;
     const unrecorded = Math.max(0, totalStudents - totalRecorded);
 
-    return { totalStudents, hadir, terlambat, izinSakit, alpa, unrecorded };
-  }, [students, dateFilteredRecords]);
+    return { totalStudents, hadir, terlambat, izinSakit, alpa, totalRecorded, unrecorded };
+  }, [students, dateFilteredRecords, isWaliKelas, myHomeroom, selectedClass]);
 
   // Available classes for filter
   const classesList = useMemo(() => {
@@ -119,11 +135,18 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       const matchSearch =
         rec.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         rec.nis.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchClass = selectedClass === 'Semua' || rec.classRoom === selectedClass;
+
+      let matchClass = true;
+      if (isWaliKelas && myHomeroom) {
+        matchClass = isHomeroomClassMatch(rec.classRoom, myHomeroom);
+      } else if (selectedClass !== 'Semua') {
+        matchClass = isHomeroomClassMatch(rec.classRoom, selectedClass) || rec.classRoom === selectedClass;
+      }
+
       const matchStatus = selectedStatus === 'Semua' || rec.status === selectedStatus;
       return matchSearch && matchClass && matchStatus;
     });
-  }, [dateFilteredRecords, searchTerm, selectedClass, selectedStatus]);
+  }, [dateFilteredRecords, searchTerm, isWaliKelas, myHomeroom, selectedClass, selectedStatus]);
 
   const handleExportCSV = () => {
     if (!filteredTableData || filteredTableData.length === 0) {
@@ -714,11 +737,13 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-medium focus:outline-none focus:border-indigo-500 focus:bg-white"
                 >
                   <option value="">-- Pilih Siswa --</option>
-                  {students.map((std) => (
-                    <option key={std.id} value={std.id}>
-                      {std.name} ({std.nis}) - Kelas {std.classRoom}
-                    </option>
-                  ))}
+                  {students
+                    .filter((std) => (isWaliKelas && myHomeroom ? isHomeroomClassMatch(std.classRoom, myHomeroom) : true))
+                    .map((std) => (
+                      <option key={std.id} value={std.id}>
+                        {std.name} ({std.nis}) - {formatClassLabel(std.classRoom)}
+                      </option>
+                    ))}
                 </select>
               </div>
 
