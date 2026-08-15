@@ -1,0 +1,10 @@
+{
+  "name": "Remix ABSENSI OGOMOJOLO",
+  "description": "Sistem Absensi QR Code Siswa dengan Dashboard, Pemindai Kamera Interaktif, Data Siswa \u0026 Kartu Digital, serta Ekspor CSV",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
