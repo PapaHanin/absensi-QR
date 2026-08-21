@@ -1,14 +1,19 @@
 import React, { useState, useMemo } from 'react';
-import { Student, AttendanceRecord, AttendanceStatus, SystemSettings, Teacher } from '../types';
+import { Student, AttendanceRecord, AttendanceStatus, SystemSettings, Teacher, ScheduledLeave, BehaviorLog } from '../types';
 import { exportAttendanceToCSV } from '../utils/csv';
 import { openWhatsAppNotification } from '../utils/whatsapp';
 import { generateAttendancePDFReport } from '../utils/pdf';
 import { AttendanceTrendChart } from './AttendanceTrendChart';
 import { isHomeroomClassMatch, formatClassLabel } from '../utils/classUtils';
+import { AutoAbsenteeModal } from './AutoAbsenteeModal';
+import { ScheduledLeaveModal } from './ScheduledLeaveModal';
+import { StudentBehaviorModal } from './StudentBehaviorModal';
 
 interface DashboardTabProps {
   students: Student[];
   attendanceRecords: AttendanceRecord[];
+  scheduledLeaves?: ScheduledLeave[];
+  behaviorLogs?: BehaviorLog[];
   selectedDate: string;
   setSelectedDate: (date: string) => void;
   settings: SystemSettings;
@@ -21,11 +26,17 @@ interface DashboardTabProps {
     customTime?: string
   ) => void;
   onDeleteRecord: (id: string) => void;
+  onSaveLeave?: (leave: ScheduledLeave, autoPopulateAttendance: boolean) => void;
+  onDeleteLeave?: (leaveId: string) => void;
+  onSaveBehaviorLog?: (log: BehaviorLog) => void;
+  onDeleteBehaviorLog?: (logId: string) => void;
 }
 
 export const DashboardTab: React.FC<DashboardTabProps> = ({
   students,
   attendanceRecords,
+  scheduledLeaves = [],
+  behaviorLogs = [],
   selectedDate,
   setSelectedDate,
   settings,
@@ -33,6 +44,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   currentTeacher,
   onAddManualAttendance,
   onDeleteRecord,
+  onSaveLeave,
+  onDeleteLeave,
+  onSaveBehaviorLog,
+  onDeleteBehaviorLog,
 }) => {
   const isAdmin = currentTeacher?.role === 'admin' || currentTeacher?.teacherType === 'admin';
   const isWaliKelas = !isAdmin && (currentTeacher?.teacherType === 'wali_kelas' || Boolean(currentTeacher?.homeroomClass));
@@ -46,6 +61,11 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const [selectedStatus, setSelectedStatus] = useState<string>('Semua');
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [exportAlertMessage, setExportAlertMessage] = useState<string | null>(null);
+
+  // New Features Modals State
+  const [isAutoAbsenteeOpen, setIsAutoAbsenteeOpen] = useState(false);
+  const [isScheduledLeaveOpen, setIsScheduledLeaveOpen] = useState(false);
+  const [isStudentBehaviorOpen, setIsStudentBehaviorOpen] = useState(false);
 
   // Manual Attendance Form State
   const [manualStudentId, setManualStudentId] = useState('');
@@ -122,6 +142,13 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
     return { totalStudents, hadir, terlambat, izinSakit, alpa, totalRecorded, unrecorded };
   }, [students, dateFilteredRecords, isWaliKelas, myHomeroom, selectedClass]);
+
+  // Active Leaves for today/selectedDate
+  const activeLeavesCount = useMemo(() => {
+    return scheduledLeaves.filter(
+      (l) => selectedDate >= l.startDate && selectedDate <= l.endDate
+    ).length;
+  }, [scheduledLeaves, selectedDate]);
 
   // Available classes for filter
   const classesList = useMemo(() => {
@@ -497,6 +524,105 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         </div>
       </div>
 
+      {/* Quick Action Tools: Auto-Flag Absentees, Scheduled Leaves, Behavior Notes */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {/* Tool 1: Auto Absentee Detection */}
+        <div className="p-4 rounded-2xl bg-linear-to-br from-rose-50 to-orange-50/60 dark:from-rose-950/30 dark:to-orange-950/20 border border-rose-200/80 dark:border-rose-800/60 shadow-xs flex flex-col justify-between gap-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center text-sm shadow-xs shrink-0">
+                <i className="fa-solid fa-bell"></i>
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                  Peringatan Siswa Alpha
+                </h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                  Deteksi otomatis & kirim WA
+                </p>
+              </div>
+            </div>
+            {stats.unrecorded > 0 ? (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-600 text-white animate-pulse">
+                {stats.unrecorded} Belum Hadir
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                Lengkap
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsAutoAbsenteeOpen(true)}
+            className="w-full py-2 px-3 bg-white dark:bg-slate-900 hover:bg-rose-600 hover:text-white dark:hover:bg-rose-600 dark:hover:text-white text-rose-700 dark:text-rose-300 text-xs font-bold rounded-xl border border-rose-200 dark:border-rose-800 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+          >
+            <i className="fa-solid fa-magnifying-glass-chart"></i>
+            <span>Cek Siswa Belum Hadir</span>
+          </button>
+        </div>
+
+        {/* Tool 2: Scheduled Leaves & Doctor's Note */}
+        <div className="p-4 rounded-2xl bg-linear-to-br from-sky-50 to-indigo-50/60 dark:from-sky-950/30 dark:to-indigo-950/20 border border-sky-200/80 dark:border-sky-800/60 shadow-xs flex flex-col justify-between gap-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-sky-600 text-white flex items-center justify-center text-sm shadow-xs shrink-0">
+                <i className="fa-solid fa-calendar-check"></i>
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                  Izin / Sakit Terjadwal
+                </h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                  Izin multi-hari & surat dokter
+                </p>
+              </div>
+            </div>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300">
+              {activeLeavesCount > 0 ? `${activeLeavesCount} Aktif Hari Ini` : `${scheduledLeaves.length} Total Izin`}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsScheduledLeaveOpen(true)}
+            className="w-full py-2 px-3 bg-white dark:bg-slate-900 hover:bg-sky-600 hover:text-white dark:hover:bg-sky-600 dark:hover:text-white text-sky-700 dark:text-sky-300 text-xs font-bold rounded-xl border border-sky-200 dark:border-sky-800 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+          >
+            <i className="fa-solid fa-file-medical"></i>
+            <span>Kelola Izin & Bukti Dokter</span>
+          </button>
+        </div>
+
+        {/* Tool 3: Behavior & Character Logs */}
+        <div className="p-4 rounded-2xl bg-linear-to-br from-amber-50 to-yellow-50/60 dark:from-amber-950/30 dark:to-yellow-950/20 border border-amber-200/80 dark:border-amber-800/60 shadow-xs flex flex-col justify-between gap-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center text-sm shadow-xs shrink-0">
+                <i className="fa-solid fa-star"></i>
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                  Jurnal & Poin Karakter
+                </h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                  Kedisiplinan & evaluasi rapor
+                </p>
+              </div>
+            </div>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300">
+              {behaviorLogs.length} Catatan
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsStudentBehaviorOpen(true)}
+            className="w-full py-2 px-3 bg-white dark:bg-slate-900 hover:bg-amber-600 hover:text-white dark:hover:bg-amber-600 dark:hover:text-white text-amber-700 dark:text-amber-300 text-xs font-bold rounded-xl border border-amber-200 dark:border-amber-800 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+          >
+            <i className="fa-solid fa-book-bookmark"></i>
+            <span>Buka Jurnal & Poin Siswa</span>
+          </button>
+        </div>
+      </div>
+
       {/* 7-Day Attendance Trend Visualizer (Recharts) */}
       <AttendanceTrendChart
         students={students}
@@ -838,6 +964,44 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* 1. Modal Auto Absentee Detection */}
+      {isAutoAbsenteeOpen && (
+        <AutoAbsenteeModal
+          students={students}
+          attendanceRecords={attendanceRecords}
+          selectedDate={selectedDate}
+          settings={settings}
+          currentTeacher={currentTeacher || null}
+          onAddManualAttendance={onAddManualAttendance}
+          onClose={() => setIsAutoAbsenteeOpen(false)}
+        />
+      )}
+
+      {/* 2. Modal Scheduled Leaves & Doctor Note Upload */}
+      {isScheduledLeaveOpen && onSaveLeave && onDeleteLeave && (
+        <ScheduledLeaveModal
+          students={students}
+          leaves={scheduledLeaves}
+          currentTeacher={currentTeacher || null}
+          onSaveLeave={onSaveLeave}
+          onDeleteLeave={onDeleteLeave}
+          onClose={() => setIsScheduledLeaveOpen(false)}
+        />
+      )}
+
+      {/* 3. Modal Student Behavior & Character Log */}
+      {isStudentBehaviorOpen && onSaveBehaviorLog && onDeleteBehaviorLog && (
+        <StudentBehaviorModal
+          students={students}
+          behaviorLogs={behaviorLogs}
+          settings={settings}
+          currentTeacher={currentTeacher || null}
+          onSaveBehaviorLog={onSaveBehaviorLog}
+          onDeleteBehaviorLog={onDeleteBehaviorLog}
+          onClose={() => setIsStudentBehaviorOpen(false)}
+        />
       )}
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Student, Gender, SystemSettings, Teacher } from '../types';
+import { Student, Gender, SystemSettings, Teacher, ScheduledLeave, BehaviorLog } from '../types';
 import { StudentCardModal } from './StudentCardModal';
 import { BulkCardPrintModal } from './BulkCardPrintModal';
 import { MALE_BW_AVATAR, FEMALE_BW_AVATAR, getDefaultAvatar } from '../utils/avatars';
@@ -8,28 +8,56 @@ import { exportStudentsToCSV, downloadStudentImportTemplateCSV, parseStudentImpo
 import { downloadStudentImportTemplateExcel, parseStudentExcelFile } from '../utils/excel';
 import { formatPhoneNumberForWA } from '../utils/whatsapp';
 import { isHomeroomClassMatch, formatClassLabel } from '../utils/classUtils';
+import { ScheduledLeaveModal } from './ScheduledLeaveModal';
+import { StudentBehaviorModal } from './StudentBehaviorModal';
 
 interface StudentsTabProps {
   students: Student[];
   settings: SystemSettings;
   currentTeacher: Teacher | null;
+  scheduledLeaves?: ScheduledLeave[];
+  behaviorLogs?: BehaviorLog[];
   onAddStudent: (student: Omit<Student, 'id' | 'createdAt'>) => void;
   onAddBulkStudents?: (students: Student[]) => void;
   onUpdateStudent: (student: Student) => void;
   onDeleteStudent: (id: string) => void;
+  onDeleteBulkStudents?: (ids: string[]) => void;
+  onSaveLeave?: (leave: ScheduledLeave, autoPopulateAttendance: boolean) => void;
+  onDeleteLeave?: (leaveId: string) => void;
+  onSaveBehaviorLog?: (log: BehaviorLog) => void;
+  onDeleteBehaviorLog?: (logId: string) => void;
 }
 
 export const StudentsTab: React.FC<StudentsTabProps> = ({
   students,
   settings,
   currentTeacher,
+  scheduledLeaves = [],
+  behaviorLogs = [],
   onAddStudent,
   onAddBulkStudents,
   onUpdateStudent,
   onDeleteStudent,
+  onDeleteBulkStudents,
+  onSaveLeave,
+  onDeleteLeave,
+  onSaveBehaviorLog,
+  onDeleteBehaviorLog,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'nis' | 'class'>('name');
+
+  // Multi-select state for bulk actions (Delete & Print A4)
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+  const [bulkPrintSelectedIds, setBulkPrintSelectedIds] = useState<string[] | undefined>(undefined);
+  const [bulkPrintLayout, setBulkPrintLayout] = useState<'1_per_page' | '4_per_page' | '6_per_page' | '8_per_page'>('8_per_page');
+  const headerCheckboxRef = useRef<HTMLInputElement | null>(null);
+
+  // Behavior & Leave Modals in StudentsTab
+  const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
+  const [isBehaviorModalOpen, setIsBehaviorModalOpen] = useState(false);
+  const [targetStudentForModal, setTargetStudentForModal] = useState<string | null>(null);
 
   // Permission Logic:
   // - Admin: Akses penuh edit & hapus semua kelas
@@ -88,7 +116,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
   const [formData, setFormData] = useState({
     nis: '',
     name: '',
-    classRoom: '1-A',
+    classRoom: 'Kelas 1',
     gender: 'Laki-laki' as Gender,
     parentPhone: '',
     avatarUrl: MALE_BW_AVATAR,
@@ -148,6 +176,98 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
         return a.name.localeCompare(b.name);
       });
   }, [students, searchTerm, isWaliKelas, myHomeroom, selectedClass, sortBy]);
+
+  // Multi-selection computed states & effects
+  const isAllFilteredSelected = filteredStudents.length > 0 && filteredStudents.every((s) => selectedStudentIds.has(s.id));
+  const isSomeFilteredSelected = filteredStudents.some((s) => selectedStudentIds.has(s.id)) && !isAllFilteredSelected;
+
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = isSomeFilteredSelected;
+    }
+  }, [isSomeFilteredSelected]);
+
+  const handleToggleSelectAll = () => {
+    if (isAllFilteredSelected) {
+      setSelectedStudentIds((prev) => {
+        const next = new Set(prev);
+        filteredStudents.forEach((s) => next.delete(s.id));
+        return next;
+      });
+    } else {
+      setSelectedStudentIds((prev) => {
+        const next = new Set(prev);
+        filteredStudents.forEach((s) => next.add(s.id));
+        return next;
+      });
+    }
+  };
+
+  const handleToggleSelectStudent = (studentId: string) => {
+    setSelectedStudentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(studentId)) {
+        next.delete(studentId);
+      } else {
+        next.add(studentId);
+      }
+      return next;
+    });
+  };
+
+  const handleClearSelection = () => {
+    setSelectedStudentIds(new Set());
+  };
+
+  const handleOpenBulkPrintSelected = () => {
+    if (selectedStudentIds.size === 0) {
+      alert('Pilih minimal satu siswa untuk dicetak!');
+      return;
+    }
+    setBulkPrintSelectedIds(Array.from(selectedStudentIds));
+    setBulkPrintLayout('8_per_page');
+    setIsBulkPrintModalOpen(true);
+  };
+
+  const handleOpenBulkPrintAll = () => {
+    setBulkPrintSelectedIds(undefined);
+    setBulkPrintLayout('8_per_page');
+    setIsBulkPrintModalOpen(true);
+  };
+
+  const handleOpenBulkDelete = () => {
+    if (selectedStudentIds.size === 0) {
+      alert('Pilih minimal satu siswa untuk dihapus!');
+      return;
+    }
+    if (isGuruMapel) {
+      alert('Akun Guru Mapel tidak memiliki izin menghapus data siswa. Hanya Wali Kelas dan Admin yang berhak menghapus data.');
+      return;
+    }
+    setIsBulkDeleteModalOpen(true);
+  };
+
+  const handleConfirmBulkDelete = () => {
+    const idsToDelete = Array.from(selectedStudentIds).filter((id) => {
+      const std = students.find((s) => s.id === id);
+      return std ? canDeleteStudent(std) : false;
+    });
+
+    if (idsToDelete.length === 0) {
+      alert('Anda tidak memiliki wewenang untuk menghapus siswa yang dipilih.');
+      setIsBulkDeleteModalOpen(false);
+      return;
+    }
+
+    if (onDeleteBulkStudents) {
+      onDeleteBulkStudents(idsToDelete);
+    } else {
+      idsToDelete.forEach((id) => onDeleteStudent(id));
+    }
+
+    setSelectedStudentIds(new Set());
+    setIsBulkDeleteModalOpen(false);
+  };
 
   const handleOpenAddForm = () => {
     if (isGuruMapel) {
@@ -230,7 +350,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
 
     setIsParsingExcel(true);
     try {
-      const defaultClass = selectedClass !== 'Semua' ? selectedClass : '1-A';
+      const defaultClass = selectedClass !== 'Semua' ? selectedClass : 'Kelas 1';
       const { students: parsedStudents, errors, addedCount } = await parseStudentExcelFile(file, defaultClass, students);
 
       if (parsedStudents.length === 0) {
@@ -279,7 +399,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
     reader.onload = (event) => {
       const content = event.target?.result as string;
       if (content) {
-        const defaultClass = selectedClass !== 'Semua' ? selectedClass : '1-A';
+        const defaultClass = selectedClass !== 'Semua' ? selectedClass : 'Kelas 1';
         const { students: parsedStudents, errors } = parseStudentImportCSV(content, defaultClass, students);
 
         if (parsedStudents.length === 0) {
@@ -415,13 +535,43 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
 
           {/* Cetak Kartu Massal A4 Button (Available for all roles) */}
           <button
-            onClick={() => setIsBulkPrintModalOpen(true)}
+            onClick={handleOpenBulkPrintAll}
             className="flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
             title="Cetak Kartu Siswa Massal Format Kertas A4 (Download PDF / Cetak Langsung)"
           >
             <i className="fa-solid fa-print text-xs"></i>
             <span>Cetak Kartu A4</span>
           </button>
+
+          {/* Jurnal Karakter & Poin Siswa Shortcut Button */}
+          {onSaveBehaviorLog && (
+            <button
+              onClick={() => {
+                setTargetStudentForModal(null);
+                setIsBehaviorModalOpen(true);
+              }}
+              className="flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
+              title="Buka Jurnal Karakter & Poin Kebaikan / Pelanggaran Siswa"
+            >
+              <i className="fa-solid fa-star text-xs"></i>
+              <span>Jurnal Karakter</span>
+            </button>
+          )}
+
+          {/* Izin / Sakit Terjadwal Shortcut Button */}
+          {onSaveLeave && (
+            <button
+              onClick={() => {
+                setTargetStudentForModal(null);
+                setIsLeaveModalOpen(true);
+              }}
+              className="flex items-center justify-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
+              title="Buka Menu Izin / Sakit Terjadwal & Upload Bukti Surat Dokter"
+            >
+              <i className="fa-solid fa-calendar-days text-xs"></i>
+              <span>Izin Terjadwal</span>
+            </button>
+          )}
 
           {/* Export CSV Button (Available to all) */}
           <button
@@ -655,14 +805,80 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
               )}
             </span>
           </div>
+          {selectedStudentIds.size > 0 && (
+            <span className="font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded-lg border border-indigo-200 dark:border-indigo-800">
+              {selectedStudentIds.size} siswa dicentang
+            </span>
+          )}
         </div>
+
+        {/* Floating / Inline Bulk Actions Bar */}
+        {selectedStudentIds.size > 0 && (
+          <div className="bg-gradient-to-r from-indigo-50 via-sky-50 to-indigo-50 dark:from-indigo-950/70 dark:via-slate-900 dark:to-indigo-950/70 border-2 border-indigo-500/40 rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm animate-fade-in">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xs font-bold shrink-0 shadow-xs">
+                <i className="fa-solid fa-check-double"></i>
+              </div>
+              <div>
+                <div className="text-xs font-extrabold text-indigo-950 dark:text-indigo-100 flex items-center gap-1.5">
+                  <span>{selectedStudentIds.size} Siswa Dicentang</span>
+                  <span className="text-[10px] font-normal text-indigo-700 dark:text-indigo-300">
+                    (dari {filteredStudents.length} siswa tampil)
+                  </span>
+                </div>
+                <p className="text-[11px] text-indigo-700 dark:text-indigo-300">
+                  Pilih aksi: Cetak kartu absensi 2x4 (A4) atau hapus siswa yang dipilih sekaligus.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={handleClearSelection}
+                className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
+              >
+                Batal Centang
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenBulkPrintSelected}
+                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+                title="Cetak Kartu Siswa Dicentang dalam Ukuran 2x4 (8 per halaman A4)"
+              >
+                <i className="fa-solid fa-print text-xs"></i>
+                <span>Cetak Kartu A4 (2x4) ({selectedStudentIds.size})</span>
+              </button>
+              {!isGuruMapel && (
+                <button
+                  type="button"
+                  onClick={handleOpenBulkDelete}
+                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+                  title="Hapus Siswa yang Dicentang dari Database"
+                >
+                  <i className="fa-solid fa-trash-can text-xs"></i>
+                  <span>Hapus ({selectedStudentIds.size})</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Table */}
         <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 uppercase tracking-wider text-[10px] font-bold border-b border-slate-200 dark:border-slate-700">
               <tr>
-                <th className="py-3 px-4">No</th>
+                <th className="py-3 px-3 w-10 text-center">
+                  <input
+                    type="checkbox"
+                    ref={headerCheckboxRef}
+                    checked={isAllFilteredSelected}
+                    onChange={handleToggleSelectAll}
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer border-slate-300 dark:border-slate-600 accent-indigo-600"
+                    title={isAllFilteredSelected ? 'Batalkan pilihan semua siswa' : 'Centang semua siswa di tabel ini'}
+                  />
+                </th>
+                <th className="py-3 px-3">No</th>
                 <th className="py-3 px-4">Foto & Nama</th>
                 <th className="py-3 px-4">NIS</th>
                 <th className="py-3 px-4">Kelas</th>
@@ -675,9 +891,27 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
               {filteredStudents.length > 0 ? (
                 filteredStudents.map((student, index) => {
                   const displayPhoto = student.photo || student.avatarUrl || getDefaultAvatar(student.gender);
+                  const isSelected = selectedStudentIds.has(student.id);
+
                   return (
-                    <tr key={student.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/60 transition-colors">
-                      <td className="py-3 px-4 font-mono text-slate-400 font-medium">{index + 1}</td>
+                    <tr
+                      key={student.id}
+                      className={`transition-colors ${
+                        isSelected
+                          ? 'bg-indigo-50/70 dark:bg-indigo-950/40'
+                          : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/60'
+                      }`}
+                    >
+                      <td className="py-3 px-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSelectStudent(student.id)}
+                          className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer border-slate-300 dark:border-slate-600 accent-indigo-600"
+                          title={isSelected ? 'Batalkan centang siswa ini' : 'Centang siswa ini'}
+                        />
+                      </td>
+                      <td className="py-3 px-3 font-mono text-slate-400 font-medium">{index + 1}</td>
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-3">
                           <img
@@ -725,6 +959,34 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
                             <span>Kartu QR</span>
                           </button>
 
+                          {/* Quick Jurnal Karakter */}
+                          {onSaveBehaviorLog && (
+                            <button
+                              onClick={() => {
+                                setTargetStudentForModal(student.id);
+                                setIsBehaviorModalOpen(true);
+                              }}
+                              className="p-1.5 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg transition-colors cursor-pointer"
+                              title={`Catat Poin Karakter / Pelanggaran untuk ${student.name}`}
+                            >
+                              <i className="fa-solid fa-star text-xs"></i>
+                            </button>
+                          )}
+
+                          {/* Quick Izin / Sakit */}
+                          {onSaveLeave && (
+                            <button
+                              onClick={() => {
+                                setTargetStudentForModal(student.id);
+                                setIsLeaveModalOpen(true);
+                              }}
+                              className="p-1.5 text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/40 rounded-lg transition-colors cursor-pointer"
+                              title={`Catat Izin / Sakit Terjadwal untuk ${student.name}`}
+                            >
+                              <i className="fa-solid fa-calendar-plus text-xs"></i>
+                            </button>
+                          )}
+
                           {/* Edit & Delete Buttons with Permission Check */}
                           {canEditStudent(student) ? (
                             <>
@@ -763,7 +1025,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
                 })
               ) : (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-500 dark:text-slate-400">
+                  <td colSpan={8} className="py-12 text-center text-slate-500 dark:text-slate-400">
                     <div className="max-w-xs mx-auto space-y-2">
                       <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto text-slate-400 text-lg">
                         <i className="fa-solid fa-user-slash"></i>
@@ -1056,11 +1318,16 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
           settings={settings}
           currentTeacher={currentTeacher}
           initialClass={effectiveClass}
-          onClose={() => setIsBulkPrintModalOpen(false)}
+          initialSelectedIds={bulkPrintSelectedIds}
+          initialLayout={bulkPrintLayout}
+          onClose={() => {
+            setIsBulkPrintModalOpen(false);
+            setBulkPrintSelectedIds(undefined);
+          }}
         />
       )}
 
-      {/* Confirmation Modal for Delete Student */}
+      {/* Confirmation Modal for Delete Single Student */}
       {studentToDelete && (
         <div className="fixed inset-0 z-60 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-sm w-full p-5 text-center space-y-4 shadow-2xl animate-scale-up">
@@ -1100,6 +1367,96 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Confirmation Modal for Bulk Delete Students */}
+      {isBulkDeleteModalOpen && (
+        <div className="fixed inset-0 z-60 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-5 text-center space-y-4 shadow-2xl animate-scale-up">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto text-xl shadow-xs">
+              <i className="fa-solid fa-trash-can"></i>
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-base font-extrabold text-slate-900 dark:text-white">
+                Hapus {selectedStudentIds.size} Siswa Terpilih?
+              </h4>
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                Apakah Anda yakin ingin menghapus data <strong>{selectedStudentIds.size} siswa</strong> yang dicentang? Tindakan ini akan menghapus data siswa secara permanen dari database.
+              </p>
+              <div className="max-h-48 overflow-y-auto text-[11px] bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-xl p-2.5 mt-2 text-left divide-y divide-slate-100 dark:divide-slate-700">
+                {Array.from(selectedStudentIds).map((id) => {
+                  const std = students.find((s) => s.id === id);
+                  if (!std) return null;
+                  const canDel = canDeleteStudent(std);
+                  return (
+                    <div key={id} className="py-1.5 flex items-center justify-between gap-2">
+                      <div className="truncate">
+                        <span className="font-bold text-slate-800 dark:text-slate-200">{std.name}</span>{' '}
+                        <span className="text-slate-400 font-mono text-[10px]">(NIS: {std.nis})</span>
+                      </div>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${
+                        canDel
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                          : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                      }`}>
+                        {canDel ? `Kelas ${std.classRoom}` : 'Tidak Berizin'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsBulkDeleteModalOpen(false)}
+                className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold rounded-xl transition-all cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBulkDelete}
+                className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-xs"
+              >
+                Ya, Hapus ({selectedStudentIds.size}) Siswa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scheduled Leaves Modal */}
+      {isLeaveModalOpen && onSaveLeave && onDeleteLeave && (
+        <ScheduledLeaveModal
+          students={students}
+          leaves={scheduledLeaves}
+          currentTeacher={currentTeacher}
+          initialStudentId={targetStudentForModal || undefined}
+          onSaveLeave={onSaveLeave}
+          onDeleteLeave={onDeleteLeave}
+          onClose={() => {
+            setIsLeaveModalOpen(false);
+            setTargetStudentForModal(null);
+          }}
+        />
+      )}
+
+      {/* Student Behavior & Character Log Modal */}
+      {isBehaviorModalOpen && onSaveBehaviorLog && onDeleteBehaviorLog && (
+        <StudentBehaviorModal
+          students={students}
+          behaviorLogs={behaviorLogs}
+          settings={settings}
+          currentTeacher={currentTeacher}
+          initialStudentId={targetStudentForModal || undefined}
+          onSaveBehaviorLog={onSaveBehaviorLog}
+          onDeleteBehaviorLog={onDeleteBehaviorLog}
+          onClose={() => {
+            setIsBehaviorModalOpen(false);
+            setTargetStudentForModal(null);
+          }}
+        />
       )}
     </div>
   );

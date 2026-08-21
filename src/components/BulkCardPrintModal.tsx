@@ -9,16 +9,20 @@ interface BulkCardPrintModalProps {
   settings: SystemSettings;
   currentTeacher: Teacher | null;
   initialClass?: string;
+  initialSelectedIds?: string[];
+  initialLayout?: CardLayoutMode;
   onClose: () => void;
 }
 
-type CardLayoutMode = '4_per_page' | '6_per_page' | '1_per_page';
+export type CardLayoutMode = '8_per_page' | '4_per_page' | '6_per_page' | '1_per_page';
 
 export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
   students,
   settings,
   currentTeacher,
   initialClass = 'Semua',
+  initialSelectedIds,
+  initialLayout = '8_per_page',
   onClose,
 }) => {
   const isAdmin = currentTeacher?.role === 'admin' || currentTeacher?.teacherType === 'admin';
@@ -34,8 +38,13 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
     return initialClass !== 'Semua' ? initialClass : 'Semua';
   });
 
-  const [layoutMode, setLayoutMode] = useState<CardLayoutMode>('4_per_page');
-  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
+  const [layoutMode, setLayoutMode] = useState<CardLayoutMode>(initialLayout);
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(() => {
+    if (initialSelectedIds && initialSelectedIds.length > 0) {
+      return new Set(initialSelectedIds);
+    }
+    return new Set();
+  });
   const [qrMap, setQrMap] = useState<Record<string, string>>({});
   const [isGeneratingQR, setIsGeneratingQR] = useState(true);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
@@ -71,10 +80,12 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
     });
   }, [students, isWaliKelas, myHomeroom, selectedClass, searchQuery]);
 
-  // Initialize all student IDs as selected by default when filter changes
+  // Initialize selected student IDs if not passed via props
   useEffect(() => {
-    setSelectedStudentIds(new Set(classFilteredStudents.map((s) => s.id)));
-  }, [classFilteredStudents]);
+    if (!initialSelectedIds || initialSelectedIds.length === 0) {
+      setSelectedStudentIds(new Set(classFilteredStudents.map((s) => s.id)));
+    }
+  }, [classFilteredStudents, initialSelectedIds]);
 
   // Generate QR Code Data URLs for all students in the list
   useEffect(() => {
@@ -156,7 +167,92 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
       const contentWidth = pageWidth - margin * 2;
       const contentHeight = pageHeight - margin * 2;
 
-      if (layoutMode === '4_per_page') {
+      if (layoutMode === '8_per_page') {
+        // 2 columns x 4 rows = 8 cards per A4 page (Ukuran Kartu 2x4 Presisi)
+        const cardsPerPage = 8;
+        const cardWidth = (contentWidth - 6) / 2; // ~94mm
+        const cardHeight = (contentHeight - 15) / 4; // ~66.5mm
+
+        for (let i = 0; i < printableStudents.length; i++) {
+          const student = printableStudents[i];
+          const slotIndex = i % cardsPerPage;
+
+          if (i > 0 && slotIndex === 0) {
+            doc.addPage();
+          }
+
+          const col = slotIndex % 2;
+          const row = Math.floor(slotIndex / 2);
+          const x = margin + col * (cardWidth + 6);
+          const y = margin + row * (cardHeight + 5);
+
+          // Card Outer Border
+          doc.setFillColor(255, 255, 255);
+          doc.setDrawColor(79, 70, 229);
+          doc.setLineWidth(0.6);
+          doc.roundedRect(x, y, cardWidth, cardHeight, 2, 2, 'FD');
+
+          // Header (Height 12mm)
+          doc.setFillColor(30, 41, 59);
+          doc.roundedRect(x, y, cardWidth, 12, 2, 2, 'F');
+          doc.rect(x, y + 8, cardWidth, 4, 'F');
+
+          doc.setTextColor(255, 255, 255);
+          doc.setFontSize(7.5);
+          doc.setFont('helvetica', 'bold');
+          doc.text(settings.schoolName.toUpperCase(), x + cardWidth / 2, y + 5, { align: 'center', maxWidth: cardWidth - 4 });
+
+          doc.setFontSize(5);
+          doc.setFont('helvetica', 'normal');
+          doc.text('KARTU PRESENSI QR RESMI PELAJAR', x + cardWidth / 2, y + 9.5, { align: 'center' });
+
+          // Left side: Student details (width ~54mm)
+          const leftWidth = 52;
+          doc.setTextColor(15, 23, 42);
+          doc.setFontSize(8.5);
+          doc.setFont('helvetica', 'bold');
+          doc.text(student.name, x + 3.5, y + 17.5, { maxWidth: leftWidth });
+
+          doc.setFontSize(6.5);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(71, 85, 105);
+          doc.text(`NIS: ${student.nis}`, x + 3.5, y + 23.5);
+          doc.text(`Kelas: ${student.classRoom}  |  ${student.gender}`, x + 3.5, y + 28);
+          if (student.parentPhone) {
+            doc.text(`WA: ${student.parentPhone}`, x + 3.5, y + 32.5);
+          }
+
+          // Small Scan Instruction pill at bottom left
+          doc.setFillColor(238, 242, 255);
+          doc.roundedRect(x + 3.5, y + cardHeight - 7, leftWidth, 4.5, 1, 1, 'F');
+          doc.setFontSize(5);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(67, 56, 202);
+          doc.text('Tunjukkan QR saat presensi', x + 3.5 + leftWidth / 2, y + cardHeight - 4, { align: 'center' });
+
+          // Right side: High Contrast QR Code (32mm x 32mm)
+          const qrSize = 32;
+          const qrX = x + cardWidth - qrSize - 3.5;
+          const qrY = y + 14.5;
+
+          // QR Border / box
+          doc.setFillColor(248, 250, 252);
+          doc.setDrawColor(203, 213, 225);
+          doc.setLineWidth(0.3);
+          doc.roundedRect(qrX - 1, qrY - 1, qrSize + 2, qrSize + 2, 1, 1, 'FD');
+
+          const qrUrl = qrMap[student.id];
+          if (qrUrl) {
+            doc.addImage(qrUrl, 'PNG', qrX, qrY, qrSize, qrSize);
+          }
+
+          // Bottom label for QR
+          doc.setFontSize(4.5);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(100, 116, 139);
+          doc.text('SCAN QR DI SINI', qrX + qrSize / 2, qrY + qrSize + 3.5, { align: 'center' });
+        }
+      } else if (layoutMode === '4_per_page') {
         // 2 columns x 2 rows = 4 cards per A4 page
         const cardsPerPage = 4;
         const cardWidth = (contentWidth - 8) / 2; // ~91mm
@@ -509,21 +605,24 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
 
             {/* Layout Mode Selector */}
             <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5">
-              <i className="fa-solid fa-table-cells text-slate-500 dark:text-slate-400"></i>
-              <span className="font-semibold text-slate-500 dark:text-slate-400">Tata Letak A4:</span>
+              <i className="fa-solid fa-table-cells text-indigo-600 dark:text-indigo-400"></i>
+              <span className="font-semibold text-slate-700 dark:text-slate-300">Format Lembar A4:</span>
               <select
                 value={layoutMode}
                 onChange={(e) => setLayoutMode(e.target.value as CardLayoutMode)}
                 className="bg-transparent text-slate-800 dark:text-slate-100 font-bold focus:outline-none cursor-pointer"
               >
+                <option value="8_per_page" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
+                  8 Kartu per A4 (Format 2x4 Presisi ID Card - Rekomendasi)
+                </option>
                 <option value="4_per_page" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
-                  4 Kartu per Lembar A4 (QR Besar - Rekomendasi)
+                  4 Kartu per A4 (Format 2x2 - QR Ekstra Besar)
                 </option>
                 <option value="6_per_page" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
-                  6 Kartu per Lembar A4 (Ukuran Badge Saku)
+                  6 Kartu per A4 (Format 2x3 - Ukuran Badge Saku)
                 </option>
                 <option value="1_per_page" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
-                  1 Kartu Besar per Lembar A4 (Format Poster)
+                  1 Kartu per A4 (Format Poster Besar)
                 </option>
               </select>
             </div>
@@ -627,8 +726,10 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
               {/* Grid Layout of Cards */}
               <div
                 className={`grid gap-4 sm:gap-6 ${
-                  layoutMode === '4_per_page'
-                    ? 'grid-cols-1 md:grid-cols-2'
+                  layoutMode === '8_per_page'
+                    ? 'grid-cols-1 md:grid-cols-2 max-w-5xl mx-auto'
+                    : layoutMode === '4_per_page'
+                    ? 'grid-cols-1 md:grid-cols-2 max-w-4xl mx-auto'
                     : layoutMode === '6_per_page'
                     ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
                     : 'grid-cols-1 max-w-xl mx-auto'
@@ -642,7 +743,7 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
                     <div
                       key={student.id}
                       className={`card-item bg-white dark:bg-slate-900 border-2 border-indigo-500/30 rounded-2xl shadow-md overflow-hidden relative transition-all text-slate-900 dark:text-white ${
-                        (idx + 1) % (layoutMode === '4_per_page' ? 4 : layoutMode === '6_per_page' ? 6 : 1) === 0
+                        (idx + 1) % (layoutMode === '8_per_page' ? 8 : layoutMode === '4_per_page' ? 4 : layoutMode === '6_per_page' ? 6 : 1) === 0
                           ? 'page-break'
                           : ''
                       }`}
@@ -659,75 +760,120 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
                       </button>
 
                       {/* Card Header with School Name */}
-                      <div className="bg-slate-900 text-white p-3 text-center border-b border-indigo-500/30 relative">
+                      <div className="bg-slate-900 text-white px-3 py-2 text-center border-b border-indigo-500/30 relative">
                         <div className="flex items-center justify-center gap-1.5 mb-0.5">
-                          <div className="w-5 h-5 rounded-md bg-indigo-600 flex items-center justify-center text-white text-[10px]">
+                          <div className="w-4 h-4 rounded-md bg-indigo-600 flex items-center justify-center text-white text-[9px]">
                             <i className="fa-solid fa-graduation-cap"></i>
                           </div>
-                          <h4 className="font-extrabold text-xs tracking-wider uppercase text-indigo-200 truncate max-w-[240px]">
+                          <h4 className="font-extrabold text-xs tracking-wider uppercase text-indigo-200 truncate max-w-[260px]">
                             {settings.schoolName}
                           </h4>
                         </div>
-                        <p className="text-[9px] text-slate-400 truncate">
+                        <p className="text-[8.5px] text-slate-400 truncate">
                           {settings.schoolAddress || 'KARTU PRESENSI PELAJAR RESMI'}
                         </p>
-                        <span className="inline-block mt-1 px-2 py-0.5 bg-indigo-500/20 text-indigo-300 rounded text-[8px] font-extrabold tracking-widest uppercase border border-indigo-500/40">
-                          KARTU TANDA PELAJAR DIGITAL
-                        </span>
                       </div>
 
-                      {/* Card Body */}
-                      <div className="p-4 space-y-3">
-                        {/* Student Name & NIS Banner */}
-                        <div className="text-center">
-                          <h5 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white leading-tight">
-                            {student.name}
-                          </h5>
-                          <div className="flex items-center justify-center gap-2 mt-1 text-[11px] text-slate-600 dark:text-slate-300 font-semibold">
-                            <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-amber-600 dark:text-amber-400">
-                              NIS: {student.nis}
-                            </span>
-                            <span className="bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
-                              Kelas: {student.classRoom}
-                            </span>
-                            <span className="text-slate-500 dark:text-slate-400">
-                              {student.gender}
-                            </span>
+                      {/* Card Body: Compact 2x4 Layout vs Standard Layout */}
+                      {layoutMode === '8_per_page' ? (
+                        <div className="p-3 flex items-center justify-between gap-3">
+                          {/* Student Details Left */}
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <h5 className="font-extrabold text-sm text-slate-900 dark:text-white truncate">
+                              {student.name}
+                            </h5>
+                            <div className="flex flex-col gap-0.5 text-[11px] text-slate-600 dark:text-slate-300">
+                              <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">
+                                NIS: {student.nis}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.2 rounded border border-emerald-200 dark:border-emerald-800 text-[10px] font-bold">
+                                  Kelas {student.classRoom}
+                                </span>
+                                <span className="text-[10px] text-slate-500">{student.gender}</span>
+                              </div>
+                              {student.parentPhone && (
+                                <span className="text-[9.5px] text-slate-400 truncate">
+                                  WA: {student.parentPhone}
+                                </span>
+                              )}
+                            </div>
+                            <div className="pt-1">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 text-[9px] font-bold">
+                                <i className="fa-solid fa-qrcode text-[9px]"></i> Pindai saat presensi
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* QR Code Right */}
+                          <div className="shrink-0 flex flex-col items-center p-1.5 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-200 dark:border-slate-700">
+                            {qrUrl ? (
+                              <img
+                                src={qrUrl}
+                                alt={`QR Code ${student.name}`}
+                                className="w-24 h-24 rounded-md bg-white p-1 border border-slate-900 shadow-xs"
+                              />
+                            ) : (
+                              <div className="w-24 h-24 rounded-md bg-slate-200 flex items-center justify-center text-[10px] text-slate-500">
+                                Memuat QR...
+                              </div>
+                            )}
+                            <span className="text-[8.5px] font-bold text-slate-500 mt-1">SCAN QR</span>
                           </div>
                         </div>
+                      ) : (
+                        <div className="p-4 space-y-3">
+                          {/* Student Name & NIS Banner */}
+                          <div className="text-center">
+                            <h5 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white leading-tight">
+                              {student.name}
+                            </h5>
+                            <div className="flex items-center justify-center gap-2 mt-1 text-[11px] text-slate-600 dark:text-slate-300 font-semibold">
+                              <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-amber-600 dark:text-amber-400">
+                                NIS: {student.nis}
+                              </span>
+                              <span className="bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                                Kelas: {student.classRoom}
+                              </span>
+                              <span className="text-slate-500 dark:text-slate-400">
+                                {student.gender}
+                              </span>
+                            </div>
+                          </div>
 
-                        {/* Extra Large High-Contrast QR Code */}
-                        <div className="flex flex-col items-center justify-center p-2 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-200 dark:border-slate-700">
-                          {qrUrl ? (
-                            <img
-                              src={qrUrl}
-                              alt={`QR Code ${student.name}`}
-                              className={`rounded-lg bg-white p-1.5 border-2 border-slate-900 shadow-md ${
-                                layoutMode === '1_per_page'
-                                  ? 'w-48 h-48 sm:w-64 sm:h-64'
-                                  : layoutMode === '4_per_page'
-                                  ? 'w-36 h-36 sm:w-44 sm:h-44'
-                                  : 'w-28 h-28'
-                              }`}
-                            />
-                          ) : (
-                            <div className="w-36 h-36 rounded-lg bg-slate-200 flex items-center justify-center text-xs text-slate-500">
-                              Memuat QR...
+                          {/* Extra Large High-Contrast QR Code */}
+                          <div className="flex flex-col items-center justify-center p-2 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-200 dark:border-slate-700">
+                            {qrUrl ? (
+                              <img
+                                src={qrUrl}
+                                alt={`QR Code ${student.name}`}
+                                className={`rounded-lg bg-white p-1.5 border-2 border-slate-900 shadow-md ${
+                                  layoutMode === '1_per_page'
+                                    ? 'w-48 h-48 sm:w-64 sm:h-64'
+                                    : layoutMode === '4_per_page'
+                                    ? 'w-36 h-36 sm:w-44 sm:h-44'
+                                    : 'w-28 h-28'
+                                }`}
+                              />
+                            ) : (
+                              <div className="w-36 h-36 rounded-lg bg-slate-200 flex items-center justify-center text-xs text-slate-500">
+                                Memuat QR...
+                              </div>
+                            )}
+                            <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300 mt-1.5 flex items-center gap-1">
+                              <i className="fa-solid fa-camera text-indigo-600 dark:text-indigo-400 text-xs"></i>
+                              <span>Arahkan ke Kamera Presensi</span>
+                            </span>
+                          </div>
+
+                          {/* Footer Details: WhatsApp & Cut Line indicator */}
+                          {student.parentPhone && (
+                            <div className="text-center text-[10px] text-slate-500 dark:text-slate-400">
+                              <span>Kontak Wali Siswa: <strong className="font-mono text-slate-700 dark:text-slate-200">{student.parentPhone}</strong></span>
                             </div>
                           )}
-                          <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300 mt-1.5 flex items-center gap-1">
-                            <i className="fa-solid fa-camera text-indigo-600 dark:text-indigo-400 text-xs"></i>
-                            <span>Arahkan ke Kamera Presensi</span>
-                          </span>
                         </div>
-
-                        {/* Footer Details: WhatsApp & Cut Line indicator */}
-                        {student.parentPhone && (
-                          <div className="text-center text-[10px] text-slate-500 dark:text-slate-400">
-                            <span>Kontak Wali Siswa: <strong className="font-mono text-slate-700 dark:text-slate-200">{student.parentPhone}</strong></span>
-                          </div>
-                        )}
-                      </div>
+                      )}
 
                       {/* Visual Cutting Guide Line */}
                       <div className="border-b-2 border-dashed border-slate-300 dark:border-slate-700 relative">

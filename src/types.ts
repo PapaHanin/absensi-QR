@@ -63,6 +63,43 @@ export interface Teacher {
   subject: string; // e.g. "IPA", "Matematika", "Bahasa Indonesia", "Kurikulum & Administrasi"
   role: 'admin' | 'guru';
   teacherType: TeacherType;
-  homeroomClass?: string; // e.g. "7-A", "7-B", "8-A", "8-B", "9-A", "9-B" (wajib diisi untuk wali_kelas)
+  homeroomClass?: string; // e.g. "Kelas 1", "Kelas 2" (wajib diisi untuk wali_kelas)
 }
+
+export type LeaveType = 'Izin' | 'Sakit' | 'Dispensasi';
+
+export interface ScheduledLeave {
+  id: string;
+  studentId: string;
+  nis: string;
+  studentName: string;
+  classRoom: string;
+  type: LeaveType;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  reason: string;
+  attachmentPhoto?: string; // Base64 or image URL (surat dokter / surat izin)
+  createdAt: string;
+  recordedBy?: string;
+  status: 'Aktif' | 'Selesai' | 'Dibatalkan';
+}
+
+export type BehaviorType = 'positive' | 'negative' | 'neutral';
+
+export interface BehaviorLog {
+  id: string;
+  studentId: string;
+  nis: string;
+  studentName: string;
+  classRoom: string;
+  date: string; // YYYY-MM-DD
+  type: BehaviorType;
+  category: string; // e.g. 'Kedisiplinan', 'Kerapihan', 'Prestasi', 'Sikap / Karakter', 'Lainnya'
+  title: string; // e.g. 'Seragam Rapi Lengkap', 'Juara Lomba Matematika', 'Terlambat Masuk'
+  points: number; // e.g. +5, +10, -5, -10, 0
+  description: string;
+  recordedBy: string; // Teacher or Admin name
+  createdAt: string;
+}
+
 

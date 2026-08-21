@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Student, AttendanceRecord, SystemSettings } from '../types';
 import { SD_CLASSES } from '../data/initialData';
+import { formatClassLabel } from '../utils/classUtils';
 
 interface SimulatorTabProps {
   students: Student[];
@@ -83,7 +84,7 @@ export const SimulatorTab: React.FC<SimulatorTabProps> = ({
               <option value="Semua">Semua Kelas</option>
               {Array.from(new Set([...SD_CLASSES, ...students.map((s) => s.classRoom)])).sort().map((cls) => (
                 <option key={cls} value={cls}>
-                  Kelas {cls}
+                  {formatClassLabel(cls)}
                 </option>
               ))}
             </select>

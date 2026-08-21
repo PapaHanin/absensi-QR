@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Student,
   AttendanceRecord,
@@ -7,6 +7,8 @@ import {
   AttendanceStatus,
   ToastMessage,
   Teacher,
+  ScheduledLeave,
+  BehaviorLog,
 } from './types';
 import {
   INITIAL_STUDENTS,
@@ -28,6 +30,29 @@ import { AdminProfileModal } from './components/AdminProfileModal';
 import { GuideModal } from './components/GuideModal';
 import { CloudSyncModal } from './components/CloudSyncModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { testFirestoreConnection } from './firebase';
+import {
+  subscribeToStudents,
+  subscribeToAttendance,
+  subscribeToTeachers,
+  subscribeToSettings,
+  subscribeToLeaves,
+  subscribeToBehaviorLogs,
+  saveStudentToFirestore,
+  deleteStudentFromFirestore,
+  bulkDeleteStudentsFromFirestore,
+  syncAllStudentsToFirestore,
+  saveAttendanceToFirestore,
+  deleteAttendanceFromFirestore,
+  saveTeacherToFirestore,
+  deleteTeacherFromFirestore,
+  saveSettingsToFirestore,
+  saveLeaveToFirestore,
+  deleteLeaveFromFirestore,
+  saveBehaviorLogToFirestore,
+  deleteBehaviorLogFromFirestore,
+  seedInitialFirestoreDataIfEmpty,
+} from './services/firestoreService';
 
 const LOCAL_STORAGE_KEYS = {
   STUDENTS: 'absensi_siswa_students_v2',
@@ -35,10 +60,13 @@ const LOCAL_STORAGE_KEYS = {
   SETTINGS: 'absensi_siswa_settings_v1',
   TEACHERS: 'absensi_siswa_teachers_v2',
   CURRENT_TEACHER: 'absensi_siswa_current_teacher_v2',
+  LEAVES: 'absensi_siswa_leaves_v1',
+  BEHAVIOR_LOGS: 'absensi_siswa_behavior_logs_v1',
 };
 
 export default function App() {
   const todayStr = getTodayDateString();
+  const isInitialMount = useRef(true);
 
   // Settings state with safe JSON parse
   const [settings, setSettings] = useState<SystemSettings>(() => {
@@ -51,10 +79,9 @@ export default function App() {
     }
   });
 
-  // Students state with safe JSON parse (cleans up old v1 dummy data if present)
+  // Students state with safe JSON parse
   const [students, setStudents] = useState<Student[]>(() => {
     try {
-      // Clear legacy v1 keys that contained dummy records
       if (localStorage.getItem('absensi_siswa_students_v1')) {
         localStorage.removeItem('absensi_siswa_students_v1');
         localStorage.removeItem('absensi_siswa_attendance_v1');
@@ -63,12 +90,10 @@ export default function App() {
       const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.STUDENTS);
       const parsed: Student[] = saved ? JSON.parse(saved) : INITIAL_STUDENTS;
 
-      // Filter out any legacy dummy students
       const filtered = parsed.filter(
         (s) => !['std-1001', 'std-1002', 'std-1003', 'std-1004', 'std-1005', 'std-1006', 'std-1007', 'std-1008', 'std-1009', 'std-1010', 'std-1011', 'std-1012', 'std-1013', 'std-1014'].includes(s.id)
       );
 
-      // Ensure every single student has a strictly unique ID
       const seenIds = new Set<string>();
       return filtered.map((s, index) => {
         let uniqueId = s.id;
@@ -89,7 +114,6 @@ export default function App() {
     try {
       const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.ATTENDANCE);
       const parsed: AttendanceRecord[] = saved ? JSON.parse(saved) : generateInitialAttendance(todayStr);
-      // Filter out dummy attendance records
       return parsed.filter(
         (r) => !['std-1001', 'std-1002', 'std-1003', 'std-1004', 'std-1005', 'std-1006', 'std-1007', 'std-1008', 'std-1009', 'std-1010', 'std-1011', 'std-1012', 'std-1013', 'std-1014'].includes(r.studentId)
       );
@@ -99,10 +123,9 @@ export default function App() {
     }
   });
 
-  // Teachers state with safe JSON parse (cleans up old v1 dummy data if present)
+  // Teachers state with safe JSON parse
   const [teachers, setTeachers] = useState<Teacher[]>(() => {
     try {
-      // Clear legacy v1 teachers keys if present
       if (localStorage.getItem('absensi_siswa_teachers_v1')) {
         localStorage.removeItem('absensi_siswa_teachers_v1');
         localStorage.removeItem('absensi_siswa_current_teacher_v1');
@@ -112,14 +135,12 @@ export default function App() {
       if (!saved) return INITIAL_TEACHERS;
 
       const parsed: Teacher[] = JSON.parse(saved);
-      // Remove any dummy teachers (tch-1 through tch-8)
       const filtered = parsed.filter(
         (t) => !['tch-1', 'tch-2', 'tch-3', 'tch-4', 'tch-5', 'tch-6', 'tch-7', 'tch-8'].includes(t.id)
       );
 
       if (filtered.length === 0) return INITIAL_TEACHERS;
 
-      // Update old admin placeholder to MOH. FADLI if matched
       return filtered.map((t) => {
         if (t.id === 'tch-admin' && (t.name === 'Budi Santoso, S.Pd.SD' || !t.name)) {
           return INITIAL_TEACHERS[0];
@@ -129,6 +150,28 @@ export default function App() {
     } catch (e) {
       console.warn('Failed to parse teachers from localStorage:', e);
       return INITIAL_TEACHERS;
+    }
+  });
+
+  // Scheduled Leaves (Izin / Sakit Terjadwal) state
+  const [scheduledLeaves, setScheduledLeaves] = useState<ScheduledLeave[]>(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.LEAVES);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.warn('Failed to parse leaves from localStorage:', e);
+      return [];
+    }
+  });
+
+  // Student Behavior & Character Logs state
+  const [behaviorLogs, setBehaviorLogs] = useState<BehaviorLog[]>(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.BEHAVIOR_LOGS);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.warn('Failed to parse behavior logs from localStorage:', e);
+      return [];
     }
   });
 
@@ -197,7 +240,20 @@ export default function App() {
   // Toast Notifications
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Save to LocalStorage whenever states update
+  // Toast helper
+  const addToast = useCallback(
+    (title: string, message: string, type: 'success' | 'warning' | 'error' | 'info') => {
+      const id = Date.now().toString() + Math.random().toString(36).substring(2, 5);
+      setToasts((prev) => [...prev, { id, title, message, type }]);
+    },
+    []
+  );
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // Save to LocalStorage whenever states update (fast local cache)
   useEffect(() => {
     localStorage.setItem(LOCAL_STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
   }, [settings]);
@@ -215,6 +271,14 @@ export default function App() {
   }, [teachers]);
 
   useEffect(() => {
+    localStorage.setItem(LOCAL_STORAGE_KEYS.LEAVES, JSON.stringify(scheduledLeaves));
+  }, [scheduledLeaves]);
+
+  useEffect(() => {
+    localStorage.setItem(LOCAL_STORAGE_KEYS.BEHAVIOR_LOGS, JSON.stringify(behaviorLogs));
+  }, [behaviorLogs]);
+
+  useEffect(() => {
     if (currentTeacher) {
       localStorage.setItem(LOCAL_STORAGE_KEYS.CURRENT_TEACHER, JSON.stringify(currentTeacher));
     } else {
@@ -222,18 +286,75 @@ export default function App() {
     }
   }, [currentTeacher]);
 
-  // Toast helper
-  const addToast = useCallback(
-    (title: string, message: string, type: 'success' | 'warning' | 'error' | 'info') => {
-      const id = Date.now().toString() + Math.random().toString(36).substring(2, 5);
-      setToasts((prev) => [...prev, { id, title, message, type }]);
+  // Real-time Firestore synchronization & Initial Connection
+  useEffect(() => {
+    testFirestoreConnection();
+
+    // Seed initial data to Firestore if completely empty
+    seedInitialFirestoreDataIfEmpty(
+      INITIAL_STUDENTS,
+      INITIAL_TEACHERS,
+      DEFAULT_SETTINGS,
+      generateInitialAttendance(todayStr)
+    );
+
+    // Subscribe to Firestore collections in real-time
+    const unsubStudents = subscribeToStudents((fsStudents) => {
+      if (fsStudents && fsStudents.length > 0) {
+        setStudents(fsStudents);
+      }
+    });
+
+    const unsubAttendance = subscribeToAttendance((fsRecords) => {
+      if (fsRecords && fsRecords.length > 0) {
+        setAttendanceRecords(fsRecords);
+      }
+    });
+
+    const unsubTeachers = subscribeToTeachers((fsTeachers) => {
+      if (fsTeachers && fsTeachers.length > 0) {
+        setTeachers(fsTeachers);
+      }
+    });
+
+    const unsubSettings = subscribeToSettings((fsSettings) => {
+      if (fsSettings && fsSettings.schoolName) {
+        setSettings(fsSettings);
+      }
+    });
+
+    const unsubLeaves = subscribeToLeaves((fsLeaves) => {
+      if (fsLeaves) {
+        setScheduledLeaves(fsLeaves);
+      }
+    });
+
+    const unsubBehavior = subscribeToBehaviorLogs((fsLogs) => {
+      if (fsLogs) {
+        setBehaviorLogs(fsLogs);
+      }
+    });
+
+    return () => {
+      unsubStudents();
+      unsubAttendance();
+      unsubTeachers();
+      unsubSettings();
+      unsubLeaves();
+      unsubBehavior();
+    };
+  }, [todayStr]);
+
+  // Update Settings in State and Firestore
+  const handleUpdateSettings = useCallback(
+    (newSettings: SystemSettings) => {
+      setSettings(newSettings);
+      saveSettingsToFirestore(newSettings).catch((err) =>
+        console.warn('Failed to sync settings to Firestore:', err)
+      );
     },
     []
   );
-
-  const dismissToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  }, []);
 
   // Teacher Login Handler
   const handleTeacherLogin = (teacher: Teacher) => {
@@ -256,7 +377,6 @@ export default function App() {
 
   // Add Teacher Handler (by Admin)
   const handleAddTeacher = (newTeacherData: Omit<Teacher, 'id'>) => {
-    // Check if email already exists
     const exists = teachers.some((t) => t.email.toLowerCase() === newTeacherData.email.toLowerCase());
     if (exists) {
       addToast('Email Terdaftar', `Email ${newTeacherData.email} sudah terdaftar!`, 'error');
@@ -269,6 +389,9 @@ export default function App() {
     };
 
     setTeachers((prev) => [...prev, newTeacher]);
+    saveTeacherToFirestore(newTeacher).catch((err) =>
+      console.warn('Failed to save teacher to Firestore:', err)
+    );
     addToast('Guru Mapel Ditambahkan', `Akun ${newTeacher.name} (${newTeacher.subject}) berhasil disimpan.`, 'success');
   };
 
@@ -278,6 +401,9 @@ export default function App() {
     if (currentTeacher?.id === updatedTeacher.id) {
       setCurrentTeacher(updatedTeacher);
     }
+    saveTeacherToFirestore(updatedTeacher).catch((err) =>
+      console.warn('Failed to update teacher in Firestore:', err)
+    );
     addToast(
       'Data Diperbarui',
       `Profil ${updatedTeacher.name} (${updatedTeacher.role === 'admin' ? 'Admin' : updatedTeacher.subject}) berhasil disimpan.`,
@@ -294,6 +420,9 @@ export default function App() {
     if (currentTeacher?.id === id) {
       setCurrentTeacher(teachers.find((t) => t.id !== id) || null);
     }
+    deleteTeacherFromFirestore(id).catch((err) =>
+      console.warn('Failed to delete teacher from Firestore:', err)
+    );
     addToast('Akun Dihapus', `Akun guru ${teacher.name} telah dihapus.`, 'info');
   };
 
@@ -361,6 +490,9 @@ export default function App() {
       };
 
       setAttendanceRecords((prev) => [newRecord, ...prev]);
+      saveAttendanceToFirestore(newRecord).catch((err) =>
+        console.warn('Failed to save attendance to Firestore:', err)
+      );
 
       if (status === 'Hadir') {
         addToast('Absensi Berhasil', `[Hadir] ${student.name} (${student.classRoom}) - ${timeStr} WIB`, 'success');
@@ -407,13 +539,126 @@ export default function App() {
     };
 
     setAttendanceRecords((prev) => [newRecord, ...prev]);
+    saveAttendanceToFirestore(newRecord).catch((err) =>
+      console.warn('Failed to save manual attendance to Firestore:', err)
+    );
     addToast('Absensi Manual Saved', `Absensi manual ${student.name} (${status}) berhasil dicatat.`, 'success');
   };
 
   // Delete Attendance Record
   const handleDeleteRecord = (id: string) => {
     setAttendanceRecords((prev) => prev.filter((r) => r.id !== id));
+    deleteAttendanceFromFirestore(id).catch((err) =>
+      console.warn('Failed to delete attendance from Firestore:', err)
+    );
     addToast('Data Dihapus', 'Riwayat absensi telah dihapus.', 'info');
+  };
+
+  // Scheduled Leaves Handlers
+  const handleSaveLeave = (leave: ScheduledLeave, autoPopulateAttendance: boolean) => {
+    setScheduledLeaves((prev) => {
+      const filtered = prev.filter((l) => l.id !== leave.id);
+      return [leave, ...filtered];
+    });
+
+    saveLeaveToFirestore(leave).catch((err) =>
+      console.warn('Failed to save leave to Firestore:', err)
+    );
+
+    // Auto-populate attendance records for the dates in leave range if enabled
+    if (autoPopulateAttendance) {
+      const student = students.find((s) => s.id === leave.studentId);
+      if (student) {
+        const start = new Date(leave.startDate);
+        const end = new Date(leave.endDate);
+        const dateList: string[] = [];
+
+        // Loop inclusive date range
+        const curr = new Date(start);
+        while (curr <= end) {
+          dateList.push(curr.toISOString().slice(0, 10));
+          curr.setDate(curr.getDate() + 1);
+        }
+
+        const newRecordsToSave: AttendanceRecord[] = [];
+        setAttendanceRecords((prev) => {
+          let updated = [...prev];
+          dateList.forEach((dStr) => {
+            const existingIdx = updated.findIndex(
+              (r) => r.studentId === student.id && r.date === dStr
+            );
+            const status: AttendanceStatus = leave.type === 'Sakit' ? 'Sakit' : 'Izin';
+            const attRecord: AttendanceRecord = {
+              id: existingIdx >= 0 ? updated[existingIdx].id : `att-leave-${Date.now()}-${dStr}`,
+              studentId: student.id,
+              nis: student.nis,
+              studentName: student.name,
+              classRoom: student.classRoom,
+              date: dStr,
+              time: '07:00:00',
+              status,
+              scannedVia: 'Manual Input',
+              note: `[Izin Terjadwal] ${leave.reason}`,
+            };
+
+            if (existingIdx >= 0) {
+              updated[existingIdx] = attRecord;
+            } else {
+              updated.unshift(attRecord);
+            }
+            newRecordsToSave.push(attRecord);
+          });
+          return updated;
+        });
+
+        // Persist generated records to Firestore
+        newRecordsToSave.forEach((r) => {
+          saveAttendanceToFirestore(r).catch((err) =>
+            console.warn('Failed to save leave attendance to Firestore:', err)
+          );
+        });
+      }
+    }
+
+    addToast(
+      'Izin Tersimpan',
+      `Jadwal ${leave.type} ananda ${leave.studentName} (${leave.startDate} s/d ${leave.endDate}) berhasil dicatat.`,
+      'success'
+    );
+  };
+
+  const handleDeleteLeave = (leaveId: string) => {
+    setScheduledLeaves((prev) => prev.filter((l) => l.id !== leaveId));
+    deleteLeaveFromFirestore(leaveId).catch((err) =>
+      console.warn('Failed to delete leave from Firestore:', err)
+    );
+    addToast('Izin Dihapus', 'Data izin/sakit terjadwal telah dihapus.', 'info');
+  };
+
+  // Behavior & Character Log Handlers
+  const handleSaveBehaviorLog = (log: BehaviorLog) => {
+    setBehaviorLogs((prev) => {
+      const filtered = prev.filter((l) => l.id !== log.id);
+      return [log, ...filtered];
+    });
+
+    saveBehaviorLogToFirestore(log).catch((err) =>
+      console.warn('Failed to save behavior log to Firestore:', err)
+    );
+
+    addToast(
+      'Jurnal Karakter Tersimpan',
+      `Catatan poin ${log.type === 'positive' ? '+' : ''}${log.points} untuk ${log.studentName} berhasil dicatat.`,
+      'success'
+    );
+  };
+
+  const handleDeleteBehaviorLog = (logId: string) => {
+    setBehaviorLogs((prev) => prev.filter((l) => l.id !== logId));
+    deleteBehaviorLogFromFirestore(logId).catch((err) =>
+      console.warn('Failed to delete behavior log from Firestore:', err)
+    );
+    addToast('Catatan Dihapus', 'Catatan jurnal perilaku siswa telah dihapus.', 'info');
   };
 
   // Student Management Handlers
@@ -425,6 +670,9 @@ export default function App() {
       createdAt: getTodayDateString(),
     };
     setStudents((prev) => [...prev, newStudent]);
+    saveStudentToFirestore(newStudent).catch((err) =>
+      console.warn('Failed to save student to Firestore:', err)
+    );
     addToast('Siswa Ditambahkan', `${newStudent.name} berhasil didaftarkan.`, 'success');
   };
 
@@ -439,7 +687,11 @@ export default function App() {
     setStudents((prev) => {
       const existingNisMap = new Set(prev.map((p) => p.nis.trim()));
       const filteredNew = preparedStudents.filter((s) => !existingNisMap.has(s.nis.trim()));
-      return [...prev, ...filteredNew];
+      const updated = [...prev, ...filteredNew];
+      syncAllStudentsToFirestore(updated).catch((err) =>
+        console.warn('Failed to bulk sync students to Firestore:', err)
+      );
+      return updated;
     });
 
     addToast('Import Berhasil', `${newStudentsList.length} siswa baru berhasil ditambahkan.`, 'success');
@@ -447,21 +699,27 @@ export default function App() {
 
   const handleUpdateStudent = (updatedStudent: Student) => {
     setStudents((prev) => prev.map((s) => (s.id === updatedStudent.id ? updatedStudent : s)));
+    saveStudentToFirestore(updatedStudent).catch((err) =>
+      console.warn('Failed to update student in Firestore:', err)
+    );
     addToast('Data Diperbarui', `Data ${updatedStudent.name} berhasil diperbarui.`, 'success');
   };
 
   const handleDeleteStudent = (id: string) => {
     setStudents((prev) => prev.filter((s) => s.id !== id));
+    deleteStudentFromFirestore(id).catch((err) =>
+      console.warn('Failed to delete student from Firestore:', err)
+    );
     addToast('Siswa Dihapus', 'Siswa berhasil dihapus dari database.', 'info');
   };
 
-  // Clear all students handler
-  const handleClearAllStudents = () => {
-    setStudents([]);
-    setAttendanceRecords([]);
-    localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify([]));
-    localStorage.setItem(LOCAL_STORAGE_KEYS.ATTENDANCE, JSON.stringify([]));
-    addToast('Data Siswa Dikosongkan', 'Seluruh data siswa dan riwayat absensi telah berhasil dibersihkan.', 'info');
+  const handleBulkDeleteStudents = (ids: string[]) => {
+    const idSet = new Set(ids);
+    setStudents((prev) => prev.filter((s) => !idSet.has(s.id)));
+    bulkDeleteStudentsFromFirestore(ids).catch((err) =>
+      console.warn('Failed to bulk delete students from Firestore:', err)
+    );
+    addToast('Siswa Dihapus', `${ids.length} siswa berhasil dihapus secara permanen.`, 'info');
   };
 
   // Reset to initial dummy data
@@ -469,13 +727,18 @@ export default function App() {
     setStudents(INITIAL_STUDENTS);
     setTeachers(INITIAL_TEACHERS);
     setCurrentTeacher(INITIAL_TEACHERS[0]);
-    setAttendanceRecords(generateInitialAttendance(getTodayDateString()));
+    const initAtt = generateInitialAttendance(getTodayDateString());
+    setAttendanceRecords(initAtt);
     setSettings(DEFAULT_SETTINGS);
     localStorage.removeItem(LOCAL_STORAGE_KEYS.STUDENTS);
     localStorage.removeItem(LOCAL_STORAGE_KEYS.ATTENDANCE);
     localStorage.removeItem(LOCAL_STORAGE_KEYS.SETTINGS);
     localStorage.removeItem(LOCAL_STORAGE_KEYS.TEACHERS);
     localStorage.removeItem(LOCAL_STORAGE_KEYS.CURRENT_TEACHER);
+
+    // Sync reset to Firestore
+    syncAllStudentsToFirestore(INITIAL_STUDENTS).catch((e) => console.warn(e));
+    saveSettingsToFirestore(DEFAULT_SETTINGS).catch((e) => console.warn(e));
     addToast('Reset Berhasil', 'Data berhasil dikembalikan ke sampel data awal SD.', 'info');
   };
 
@@ -486,10 +749,20 @@ export default function App() {
     settings: SystemSettings;
     teachers: Teacher[];
   }) => {
-    if (restored.students) setStudents(restored.students);
-    if (restored.attendanceRecords) setAttendanceRecords(restored.attendanceRecords);
-    if (restored.settings) setSettings(restored.settings);
-    if (restored.teachers) setTeachers(restored.teachers);
+    if (restored.students) {
+      setStudents(restored.students);
+      syncAllStudentsToFirestore(restored.students).catch((e) => console.warn(e));
+    }
+    if (restored.attendanceRecords) {
+      setAttendanceRecords(restored.attendanceRecords);
+    }
+    if (restored.settings) {
+      setSettings(restored.settings);
+      saveSettingsToFirestore(restored.settings).catch((e) => console.warn(e));
+    }
+    if (restored.teachers) {
+      setTeachers(restored.teachers);
+    }
   };
 
   const todayCount = attendanceRecords.filter((r) => r.date === todayStr).length;
@@ -524,6 +797,8 @@ export default function App() {
               <DashboardTab
                 students={students}
                 attendanceRecords={attendanceRecords}
+                scheduledLeaves={scheduledLeaves}
+                behaviorLogs={behaviorLogs}
                 selectedDate={selectedDate}
                 setSelectedDate={setSelectedDate}
                 settings={settings}
@@ -531,6 +806,10 @@ export default function App() {
                 currentTeacher={currentTeacher}
                 onAddManualAttendance={handleAddManualAttendance}
                 onDeleteRecord={handleDeleteRecord}
+                onSaveLeave={handleSaveLeave}
+                onDeleteLeave={handleDeleteLeave}
+                onSaveBehaviorLog={handleSaveBehaviorLog}
+                onDeleteBehaviorLog={handleDeleteBehaviorLog}
               />
             </ErrorBoundary>
           )}
@@ -552,10 +831,17 @@ export default function App() {
                 students={students}
                 settings={settings}
                 currentTeacher={currentTeacher}
+                scheduledLeaves={scheduledLeaves}
+                behaviorLogs={behaviorLogs}
                 onAddStudent={handleAddStudent}
                 onAddBulkStudents={handleAddBulkStudents}
                 onUpdateStudent={handleUpdateStudent}
                 onDeleteStudent={handleDeleteStudent}
+                onDeleteBulkStudents={handleBulkDeleteStudents}
+                onSaveLeave={handleSaveLeave}
+                onDeleteLeave={handleDeleteLeave}
+                onSaveBehaviorLog={handleSaveBehaviorLog}
+                onDeleteBehaviorLog={handleDeleteBehaviorLog}
               />
             </ErrorBoundary>
           )}
@@ -568,7 +854,7 @@ export default function App() {
                 settings={settings}
                 isDarkMode={isDarkMode}
                 onToggleDarkMode={handleToggleDarkMode}
-                onUpdateSettings={setSettings}
+                onUpdateSettings={handleUpdateSettings}
                 onRecordAttendance={handleRecordAttendance}
                 onResetData={handleResetData}
               />
@@ -605,7 +891,7 @@ export default function App() {
             currentTeacher={currentTeacher}
             settings={settings}
             onUpdateTeacher={handleUpdateTeacher}
-            onUpdateSettings={setSettings}
+            onUpdateSettings={handleUpdateSettings}
             onClose={() => setIsAdminProfileModalOpen(false)}
           />
         )}
@@ -631,14 +917,17 @@ export default function App() {
           />
         )}
 
-        {/* Footer */}
-        <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500 no-print">
-          <p>
-            &copy; {new Date().getFullYear()} {settings.schoolName} — Sistem Absensi QR Code Siswa Realtime
-          </p>
+        {/* Footer with Firebase Cloud status */}
+        <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-4 text-center text-xs text-slate-500 dark:text-slate-400 no-print transition-colors">
+          <div className="flex items-center justify-center gap-2 flex-wrap px-4">
+            <span>&copy; {new Date().getFullYear()} {settings.schoolName} — Sistem Absensi QR Code Siswa</span>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              Firebase Cloud Connected
+            </span>
+          </div>
         </footer>
       </div>
     </ErrorBoundary>
   );
 }
-

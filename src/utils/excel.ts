@@ -5,7 +5,7 @@ import { Student } from '../types';
  * Downloads a true Excel (.xlsx) template for bulk student import
  * Headers: NIS, Nama, Kelas, No HP Orang Tua
  */
-export const downloadStudentImportTemplateExcel = (className: string = '1-A') => {
+export const downloadStudentImportTemplateExcel = (className: string = 'Kelas 1') => {
   const templateData = [
     {
       'NIS': '1001',

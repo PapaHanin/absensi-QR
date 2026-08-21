@@ -86,7 +86,7 @@ export const TeacherManagementModal: React.FC<TeacherManagementModalProps> = ({
       setEmail('');
       setSubject('');
       setTeacherType('wali_kelas');
-      setHomeroomClass('1-A');
+      setHomeroomClass('Kelas 1');
     }
   };
 
@@ -255,28 +255,12 @@ export const TeacherManagementModal: React.FC<TeacherManagementModalProps> = ({
                   onChange={(e) => setHomeroomClass(e.target.value)}
                   className="w-full bg-emerald-50 border border-emerald-300 text-emerald-900 font-bold rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 cursor-pointer"
                 >
-                  <optgroup label="Tingkat Kelas Reguler (SD)">
-                    <option value="Kelas 1">Wali Kelas 1</option>
-                    <option value="Kelas 2">Wali Kelas 2</option>
-                    <option value="Kelas 3">Wali Kelas 3</option>
-                    <option value="Kelas 4">Wali Kelas 4</option>
-                    <option value="Kelas 5">Wali Kelas 5</option>
-                    <option value="Kelas 6">Wali Kelas 6</option>
-                  </optgroup>
-                  <optgroup label="Tingkat Kelas Paralel (A / B)">
-                    <option value="1-A">Wali Kelas 1-A</option>
-                    <option value="1-B">Wali Kelas 1-B</option>
-                    <option value="2-A">Wali Kelas 2-A</option>
-                    <option value="2-B">Wali Kelas 2-B</option>
-                    <option value="3-A">Wali Kelas 3-A</option>
-                    <option value="3-B">Wali Kelas 3-B</option>
-                    <option value="4-A">Wali Kelas 4-A</option>
-                    <option value="4-B">Wali Kelas 4-B</option>
-                    <option value="5-A">Wali Kelas 5-A</option>
-                    <option value="5-B">Wali Kelas 5-B</option>
-                    <option value="6-A">Wali Kelas 6-A</option>
-                    <option value="6-B">Wali Kelas 6-B</option>
-                  </optgroup>
+                  <option value="Kelas 1">Wali Kelas 1</option>
+                  <option value="Kelas 2">Wali Kelas 2</option>
+                  <option value="Kelas 3">Wali Kelas 3</option>
+                  <option value="Kelas 4">Wali Kelas 4</option>
+                  <option value="Kelas 5">Wali Kelas 5</option>
+                  <option value="Kelas 6">Wali Kelas 6</option>
                 </select>
               </div>
             )}

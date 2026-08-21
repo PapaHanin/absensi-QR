@@ -161,7 +161,7 @@ export const parseStudentImportCSV = (
 
     const nis = cols[nisIdx] || '';
     const name = cols[nameIdx] || '';
-    const classRoom = cols[classIdx] || defaultClass || '1-A';
+    const classRoom = cols[classIdx] || defaultClass || 'Kelas 1';
     let gender = cols[genderIdx] || 'Laki-laki';
     const parentPhone = cols[phoneIdx] || '';
 
