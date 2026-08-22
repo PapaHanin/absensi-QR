@@ -223,11 +223,73 @@ export const TeacherManagementModal: React.FC<TeacherManagementModalProps> = ({
               <input
                 type="text"
                 required
-                placeholder="contoh: IPA / Matematika"
+                placeholder={
+                  teacherType === 'wali_kelas'
+                    ? 'contoh: Guru Kelas / Tematik'
+                    : teacherType === 'admin'
+                    ? 'contoh: Administrator / Operator Sekolah'
+                    : 'contoh: PAI / PJOK / Bahasa Inggris'
+                }
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
                 className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-indigo-500"
               />
+              {/* Preset cepat untuk mempermudah pengisian */}
+              <div className="flex flex-wrap gap-1 mt-1.5 items-center">
+                <span className="text-[10px] text-slate-400 font-medium">Pilihan cepat:</span>
+                {teacherType === 'wali_kelas' ? (
+                  <>
+                    {['Guru Kelas', 'Tematik', 'Guru Kelas & Tematik'].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setSubject(preset)}
+                        className={`text-[10px] px-2 py-0.5 rounded-md border font-semibold transition-all cursor-pointer ${
+                          subject === preset
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </>
+                ) : teacherType === 'admin' ? (
+                  <>
+                    {['Administrator', 'Operator Sekolah', 'Kepala Sekolah'].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setSubject(preset)}
+                        className={`text-[10px] px-2 py-0.5 rounded-md border font-semibold transition-all cursor-pointer ${
+                          subject === preset
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    {['PAI (Agama Islam)', 'PJOK (Olahraga)', 'Bahasa Inggris', 'Seni Budaya'].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setSubject(preset)}
+                        className={`text-[10px] px-2 py-0.5 rounded-md border font-semibold transition-all cursor-pointer ${
+                          subject === preset
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
             </div>
 
             <div>

@@ -175,22 +175,16 @@ export default function App() {
     }
   });
 
-  // Currently logged-in Teacher (default to MOH. FADLI Admin)
+  // Currently logged-in Teacher (null by default for guest / shared sessions until login)
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.CURRENT_TEACHER);
-      if (!saved) return INITIAL_TEACHERS[0];
+      if (!saved) return null;
       const parsed: Teacher = JSON.parse(saved);
-      if (
-        parsed.id === 'tch-admin' ||
-        ['tch-1', 'tch-2', 'tch-3', 'tch-4', 'tch-5', 'tch-6', 'tch-7', 'tch-8'].includes(parsed.id)
-      ) {
-        return INITIAL_TEACHERS[0];
-      }
-      return parsed;
+      return parsed && parsed.id ? parsed : null;
     } catch (e) {
       console.warn('Failed to parse current teacher from localStorage:', e);
-      return INITIAL_TEACHERS[0];
+      return null;
     }
   });
 

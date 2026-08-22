@@ -17,6 +17,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 }) => {
   const [emailInput, setEmailInput] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [showTeacherPicker, setShowTeacherPicker] = useState(false);
 
   const handleEmailSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,6 +36,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
 
     onLogin(found);
+  };
+
+  const handleQuickSelectTeacher = (teacher: Teacher) => {
+    setEmailInput(teacher.email);
+    setErrorMsg('');
+    onLogin(teacher);
   };
 
   return (
@@ -56,22 +63,32 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </div>
           <h2 className="text-xl font-extrabold text-slate-900 dark:text-white">Autentikasi Akun Guru</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto">
-            Masukkan alamat email resmi Anda yang telah didaftarkan oleh Admin Sekolah.
+            Silakan masuk dengan email terdaftar atau pilih nama Anda dari daftar guru.
           </p>
         </div>
 
         {/* Email Login Form */}
         <form onSubmit={handleEmailSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Alamat Email Terdaftar <span className="text-rose-500">*</span>
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                Alamat Email Guru <span className="text-rose-500">*</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowTeacherPicker(!showTeacherPicker)}
+                className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+              >
+                {showTeacherPicker ? 'Sembunyikan Daftar' : 'Pilih dari Daftar Guru'}
+              </button>
+            </div>
+
             <div className="relative">
               <input
                 type="email"
                 required
                 autoFocus
-                placeholder="misal: nama.guru@sd.sch.id"
+                placeholder="misal: fadli46046@gmail.com"
                 value={emailInput}
                 onChange={(e) => {
                   setEmailInput(e.target.value);
@@ -81,6 +98,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               />
               <i className="fa-solid fa-envelope absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
             </div>
+
             {errorMsg && (
               <div className="bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800/80 rounded-xl p-2.5 mt-2 text-rose-700 dark:text-rose-300 text-[11px] font-semibold flex items-start gap-2">
                 <i className="fa-solid fa-circle-exclamation mt-0.5 shrink-0 text-rose-500"></i>
@@ -94,6 +112,39 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             )}
           </div>
 
+          {/* Quick Teacher Picker List */}
+          {showTeacherPicker && (
+            <div className="border border-slate-200 dark:border-slate-700 rounded-2xl p-2.5 bg-slate-50 dark:bg-slate-800/60 max-h-48 overflow-y-auto space-y-1">
+              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 px-1 mb-1">
+                Pilih akun Anda untuk login instan:
+              </p>
+              {teachers.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => handleQuickSelectTeacher(t)}
+                  className="w-full text-left p-2 rounded-xl hover:bg-white dark:hover:bg-slate-700 border border-transparent hover:border-slate-200 dark:hover:border-slate-600 transition-all flex items-center justify-between gap-2 cursor-pointer group"
+                >
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
+                      {t.name}
+                    </p>
+                    <p className="text-[10px] text-slate-400 truncate">
+                      {t.email} • {t.role === 'admin' ? 'Admin' : t.homeroomClass ? `Wali Kelas ${t.homeroomClass}` : t.subject}
+                    </p>
+                  </div>
+                  <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${
+                    t.role === 'admin'
+                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                      : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
+                  }`}>
+                    {t.role === 'admin' ? 'Admin' : 'Guru'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
           <button
             type="submit"
             className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/20 transition-all cursor-pointer flex items-center justify-center gap-2"
@@ -106,7 +157,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
           <p className="text-[11px] text-slate-400 dark:text-slate-500 flex items-center justify-center gap-1.5">
             <i className="fa-solid fa-shield-halved text-emerald-500 text-xs"></i>
-            <span>Sesi privat terisolasi per akun guru.</span>
+            <span>Sesi terisolasi & aman per akun guru.</span>
           </p>
         </div>
       </div>
