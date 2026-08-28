@@ -46,6 +46,7 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
     return new Set();
   });
   const [qrMap, setQrMap] = useState<Record<string, string>>({});
+  const [photoMap, setPhotoMap] = useState<Record<string, string>>({});
   const [isGeneratingQR, setIsGeneratingQR] = useState(true);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -87,24 +88,68 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
     }
   }, [classFilteredStudents, initialSelectedIds]);
 
-  // Generate QR Code Data URLs for all students in the list
+  // Helper to convert image URL to Base64 for safe jsPDF rendering
+  const loadPhotoAsDataUrl = async (url: string): Promise<string | null> => {
+    if (!url) return null;
+    if (url.startsWith('data:image')) return url;
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth || 160;
+          canvas.height = img.naturalHeight || 200;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0);
+            resolve(canvas.toDataURL('image/jpeg', 0.9));
+          } else {
+            resolve(null);
+          }
+        } catch {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+  };
+
+  // Generate QR Code & Photo Data URLs for all students in the list
   useEffect(() => {
     let isMounted = true;
     setIsGeneratingQR(true);
 
     const generateAll = async () => {
-      const map: Record<string, string> = {};
+      const qMap: Record<string, string> = {};
+      const pMap: Record<string, string> = {};
+
       for (const student of classFilteredStudents) {
         try {
           const payload = createStudentQRPayload(student);
           const dataUrl = await generateQRCodeDataURL(payload);
-          map[student.id] = dataUrl;
+          qMap[student.id] = dataUrl;
         } catch (e) {
           console.error('Error generating QR for student:', student.name, e);
         }
+
+        const photoSrc = student.photo || student.avatarUrl;
+        if (photoSrc) {
+          try {
+            const photoDataUrl = await loadPhotoAsDataUrl(photoSrc);
+            if (photoDataUrl) {
+              pMap[student.id] = photoDataUrl;
+            }
+          } catch (e) {
+            console.warn('Error loading student photo for PDF:', student.name, e);
+          }
+        }
       }
+
       if (isMounted) {
-        setQrMap(map);
+        setQrMap(qMap);
+        setPhotoMap(pMap);
         setIsGeneratingQR(false);
       }
     };
@@ -206,34 +251,59 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
           doc.setFont('helvetica', 'normal');
           doc.text('KARTU PRESENSI QR RESMI PELAJAR', x + cardWidth / 2, y + 9.5, { align: 'center' });
 
-          // Left side: Student details (width ~54mm)
-          const leftWidth = 52;
+          // 1. Left side: Student text info (width ~37mm)
+          const leftWidth = 37;
           doc.setTextColor(15, 23, 42);
-          doc.setFontSize(8.5);
+          doc.setFontSize(8);
           doc.setFont('helvetica', 'bold');
-          doc.text(student.name, x + 3.5, y + 17.5, { maxWidth: leftWidth });
+          doc.text(student.name, x + 3, y + 17, { maxWidth: leftWidth });
 
           doc.setFontSize(6.5);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(71, 85, 105);
-          doc.text(`NIS: ${student.nis}`, x + 3.5, y + 23.5);
-          doc.text(`Kelas: ${student.classRoom}  |  ${student.gender}`, x + 3.5, y + 28);
+          doc.text(`NIS: ${student.nis}`, x + 3, y + 23);
+          doc.text(`Kelas: ${student.classRoom} | ${student.gender === 'Laki-laki' ? 'L' : 'P'}`, x + 3, y + 27.5);
           if (student.parentPhone) {
-            doc.text(`WA: ${student.parentPhone}`, x + 3.5, y + 32.5);
+            doc.text(`WA: ${student.parentPhone}`, x + 3, y + 32, { maxWidth: leftWidth });
           }
 
           // Small Scan Instruction pill at bottom left
           doc.setFillColor(238, 242, 255);
-          doc.roundedRect(x + 3.5, y + cardHeight - 7, leftWidth, 4.5, 1, 1, 'F');
-          doc.setFontSize(5);
+          doc.roundedRect(x + 3, y + cardHeight - 7, leftWidth, 4.5, 1, 1, 'F');
+          doc.setFontSize(4.5);
           doc.setFont('helvetica', 'bold');
           doc.setTextColor(67, 56, 202);
-          doc.text('Tunjukkan QR saat presensi', x + 3.5 + leftWidth / 2, y + cardHeight - 4, { align: 'center' });
+          doc.text('Pindai saat presensi', x + 3 + leftWidth / 2, y + cardHeight - 4, { align: 'center' });
 
-          // Right side: High Contrast QR Code (32mm x 32mm)
-          const qrSize = 32;
-          const qrX = x + cardWidth - qrSize - 3.5;
-          const qrY = y + 14.5;
+          // 2. Middle side: Student Photo (18mm x 23mm)
+          const photoW = 18;
+          const photoH = 23;
+          const photoX = x + 41.5;
+          const photoY = y + 15.5;
+
+          doc.setFillColor(241, 245, 249);
+          doc.setDrawColor(199, 210, 254);
+          doc.setLineWidth(0.3);
+          doc.roundedRect(photoX, photoY, photoW, photoH, 1, 1, 'FD');
+
+          const photoUrl = photoMap[student.id];
+          if (photoUrl) {
+            try {
+              doc.addImage(photoUrl, 'JPEG', photoX, photoY, photoW, photoH);
+            } catch (err) {
+              console.warn('PDF photo draw error:', err);
+            }
+          }
+
+          doc.setFontSize(4);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(148, 163, 184);
+          doc.text('PASFOTO', photoX + photoW / 2, photoY + photoH + 3, { align: 'center' });
+
+          // 3. Right side: High Contrast QR Code (28mm x 28mm)
+          const qrSize = 28;
+          const qrX = x + cardWidth - qrSize - 3;
+          const qrY = y + 14;
 
           // QR Border / box
           doc.setFillColor(248, 250, 252);
@@ -250,7 +320,7 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
           doc.setFontSize(4.5);
           doc.setFont('helvetica', 'bold');
           doc.setTextColor(100, 116, 139);
-          doc.text('SCAN QR DI SINI', qrX + qrSize / 2, qrY + qrSize + 3.5, { align: 'center' });
+          doc.text('SCAN QR', qrX + qrSize / 2, qrY + qrSize + 3.5, { align: 'center' });
         }
       } else if (layoutMode === '4_per_page') {
         // 2 columns x 2 rows = 4 cards per A4 page
@@ -260,7 +330,6 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
 
         for (let i = 0; i < printableStudents.length; i++) {
           const student = printableStudents[i];
-          const pageIndex = Math.floor(i / cardsPerPage);
           const slotIndex = i % cardsPerPage;
 
           if (i > 0 && slotIndex === 0) {
@@ -280,9 +349,8 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
 
           // Card Header
           doc.setFillColor(30, 41, 59); // Slate-800
-          doc.roundedRect(x, y, cardWidth, 22, 3, 3, 'F');
-          // Fix bottom corners of header
-          doc.rect(x, y + 18, cardWidth, 4, 'F');
+          doc.roundedRect(x, y, cardWidth, 20, 3, 3, 'F');
+          doc.rect(x, y + 16, cardWidth, 4, 'F');
 
           doc.setTextColor(255, 255, 255);
           doc.setFontSize(10);
@@ -294,38 +362,57 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
           doc.text(settings.schoolAddress || 'KARTU TANDA PELAJAR DIGITAL', x + cardWidth / 2, y + 12, { align: 'center' });
 
           doc.setFillColor(79, 70, 229);
-          doc.roundedRect(x + cardWidth / 2 - 25, y + 15, 50, 5, 1, 1, 'F');
-          doc.setFontSize(6);
+          doc.roundedRect(x + cardWidth / 2 - 25, y + 14.5, 50, 4.5, 1, 1, 'F');
+          doc.setFontSize(5.5);
           doc.setFont('helvetica', 'bold');
-          doc.text('KARTU PRESENSI QR RESMI', x + cardWidth / 2, y + 18.5, { align: 'center' });
+          doc.text('KARTU PRESENSI QR RESMI', x + cardWidth / 2, y + 17.5, { align: 'center' });
 
           // Student Details Block
-          let curY = y + 26;
+          let curY = y + 24;
           doc.setTextColor(15, 23, 42); // slate-900
-          doc.setFontSize(11);
+          doc.setFontSize(10.5);
           doc.setFont('helvetica', 'bold');
           doc.text(student.name, x + cardWidth / 2, curY, { align: 'center' });
 
-          curY += 5;
+          curY += 4.5;
           doc.setFontSize(7.5);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(71, 85, 105); // slate-600
           doc.text(`NIS: ${student.nis}  |  Kelas: ${student.classRoom}  |  ${student.gender}`, x + cardWidth / 2, curY, { align: 'center' });
 
           if (student.parentPhone) {
-            curY += 4;
-            doc.setFontSize(6.5);
+            curY += 3.5;
+            doc.setFontSize(6);
             doc.text(`No. WA Ortu: ${student.parentPhone}`, x + cardWidth / 2, curY, { align: 'center' });
           }
 
-          // Large High-Contrast QR Code Block (60mm x 60mm)
-          const qrSize = 58;
-          const qrX = x + (cardWidth - qrSize) / 2;
-          const qrY = curY + 4;
+          // Middle: Photo and QR Side by Side
+          const midY = curY + 3;
+          const photoW = 26;
+          const photoH = 34;
+          const photoX = x + 8;
 
-          // QR container box
-          doc.setFillColor(248, 250, 252); // Slate-50
-          doc.setDrawColor(203, 213, 225); // Slate-300
+          doc.setFillColor(241, 245, 249);
+          doc.setDrawColor(199, 210, 254);
+          doc.setLineWidth(0.4);
+          doc.roundedRect(photoX, midY + 8, photoW, photoH, 2, 2, 'FD');
+
+          const photoUrl = photoMap[student.id];
+          if (photoUrl) {
+            try {
+              doc.addImage(photoUrl, 'JPEG', photoX, midY + 8, photoW, photoH);
+            } catch (err) {
+              console.warn('PDF photo draw error:', err);
+            }
+          }
+
+          // Large High-Contrast QR Code Block (50mm x 50mm)
+          const qrSize = 48;
+          const qrX = x + cardWidth - qrSize - 8;
+          const qrY = midY;
+
+          doc.setFillColor(248, 250, 252);
+          doc.setDrawColor(203, 213, 225);
           doc.setLineWidth(0.4);
           doc.roundedRect(qrX - 2, qrY - 2, qrSize + 4, qrSize + 4, 2, 2, 'FD');
 
@@ -336,13 +423,13 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
 
           // Bottom Instruction Pill
           const footerY = y + cardHeight - 8;
-          doc.setFillColor(238, 242, 255); // Indigo-50
-          doc.setDrawColor(199, 210, 254); // Indigo-200
-          doc.roundedRect(x + 5, footerY - 4, cardWidth - 10, 8, 2, 2, 'FD');
+          doc.setFillColor(238, 242, 255);
+          doc.setDrawColor(199, 210, 254);
+          doc.roundedRect(x + 5, footerY - 4, cardWidth - 10, 7.5, 2, 2, 'FD');
 
-          doc.setFontSize(6.5);
+          doc.setFontSize(6);
           doc.setFont('helvetica', 'bold');
-          doc.setTextColor(67, 56, 202); // Indigo-700
+          doc.setTextColor(67, 56, 202);
           doc.text('Arahkan QR ke Kamera Presensi Sekolah', x + cardWidth / 2, footerY + 1, { align: 'center' });
 
           // Dashed Cutting Line between cards
@@ -396,27 +483,52 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
           doc.setFont('helvetica', 'normal');
           doc.text('KARTU TANDA PELAJAR DIGITAL', x + cardWidth / 2, y + 10.5, { align: 'center' });
 
-          // Details left side, QR right side
-          const leftWidth = 46;
+          // 1. Left details (34mm)
+          const leftWidth = 34;
           doc.setTextColor(15, 23, 42);
-          doc.setFontSize(8.5);
+          doc.setFontSize(8);
           doc.setFont('helvetica', 'bold');
-          doc.text(student.name, x + 4, y + 21, { maxWidth: leftWidth });
+          doc.text(student.name, x + 3.5, y + 20, { maxWidth: leftWidth });
 
-          doc.setFontSize(7);
+          doc.setFontSize(6.5);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(71, 85, 105);
-          doc.text(`NIS: ${student.nis}`, x + 4, y + 31);
-          doc.text(`Kelas: ${student.classRoom}`, x + 4, y + 36);
-          doc.text(`JK: ${student.gender}`, x + 4, y + 41);
+          doc.text(`NIS: ${student.nis}`, x + 3.5, y + 28);
+          doc.text(`Kelas: ${student.classRoom}`, x + 3.5, y + 33);
+          doc.text(`JK: ${student.gender}`, x + 3.5, y + 38);
           if (student.parentPhone) {
-            doc.text(`WA: ${student.parentPhone}`, x + 4, y + 46);
+            doc.text(`WA: ${student.parentPhone}`, x + 3.5, y + 43, { maxWidth: leftWidth });
           }
 
-          // Large QR on the right (38mm x 38mm)
-          const qrSize = 38;
-          const qrX = x + cardWidth - qrSize - 4;
-          const qrY = y + 17;
+          // 2. Center: Photo (19mm x 25mm)
+          const photoW = 19;
+          const photoH = 25;
+          const photoX = x + 39;
+          const photoY = y + 19;
+
+          doc.setFillColor(241, 245, 249);
+          doc.setDrawColor(199, 210, 254);
+          doc.setLineWidth(0.3);
+          doc.roundedRect(photoX, photoY, photoW, photoH, 1, 1, 'FD');
+
+          const photoUrl = photoMap[student.id];
+          if (photoUrl) {
+            try {
+              doc.addImage(photoUrl, 'JPEG', photoX, photoY, photoW, photoH);
+            } catch (err) {
+              console.warn('PDF photo draw error:', err);
+            }
+          }
+
+          doc.setFontSize(4);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(148, 163, 184);
+          doc.text('PASFOTO', photoX + photoW / 2, photoY + photoH + 3.5, { align: 'center' });
+
+          // 3. Right: Large QR (30mm x 30mm)
+          const qrSize = 30;
+          const qrX = x + cardWidth - qrSize - 3.5;
+          const qrY = y + 18;
 
           const qrUrl = qrMap[student.id];
           if (qrUrl) {
@@ -469,22 +581,42 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
           doc.text('KARTU PRESENSI QR RESMI SISWA', x + cardWidth / 2, y + 33, { align: 'center' });
 
           // Large Student Details
-          let curY = y + 55;
+          let curY = y + 50;
           doc.setTextColor(15, 23, 42);
           doc.setFontSize(22);
           doc.setFont('helvetica', 'bold');
           doc.text(student.name, x + cardWidth / 2, curY, { align: 'center' });
 
-          curY += 10;
+          curY += 9;
           doc.setFontSize(13);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(71, 85, 105);
           doc.text(`NIS: ${student.nis}   |   Kelas: ${student.classRoom}   |   ${student.gender}`, x + cardWidth / 2, curY, { align: 'center' });
 
-          // Giant QR Code (120mm x 120mm)
-          const qrSize = 120;
+          // Middle: Student Photo in Poster
+          const photoW = 36;
+          const photoH = 46;
+          const photoX = x + (cardWidth - photoW) / 2;
+          const photoY = curY + 6;
+
+          doc.setFillColor(241, 245, 249);
+          doc.setDrawColor(199, 210, 254);
+          doc.setLineWidth(0.6);
+          doc.roundedRect(photoX, photoY, photoW, photoH, 2, 2, 'FD');
+
+          const photoUrl = photoMap[student.id];
+          if (photoUrl) {
+            try {
+              doc.addImage(photoUrl, 'JPEG', photoX, photoY, photoW, photoH);
+            } catch (err) {
+              console.warn('PDF photo draw error:', err);
+            }
+          }
+
+          // Giant QR Code (95mm x 95mm) below Photo
+          const qrSize = 95;
           const qrX = x + (cardWidth - qrSize) / 2;
-          const qrY = curY + 12;
+          const qrY = photoY + photoH + 6;
 
           doc.setFillColor(248, 250, 252);
           doc.setDrawColor(203, 213, 225);
@@ -497,8 +629,8 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
           }
 
           // Footer Notice
-          const footerY = y + cardHeight - 16;
-          doc.setFontSize(11);
+          const footerY = y + cardHeight - 14;
+          doc.setFontSize(10.5);
           doc.setFont('helvetica', 'bold');
           doc.setTextColor(67, 56, 202);
           doc.text('Arahkan QR Code ini ke kamera saat presensi masuk sekolah', x + cardWidth / 2, footerY, { align: 'center' });
@@ -776,8 +908,8 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
 
                       {/* Card Body: Compact 2x4 Layout vs Standard Layout */}
                       {layoutMode === '8_per_page' ? (
-                        <div className="p-3 flex items-center justify-between gap-3">
-                          {/* Student Details Left */}
+                        <div className="p-3 flex items-center justify-between gap-2.5">
+                          {/* 1. Student Details Left */}
                           <div className="flex-1 min-w-0 space-y-1">
                             <h5 className="font-extrabold text-sm text-slate-900 dark:text-white truncate">
                               {student.name}
@@ -786,11 +918,13 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
                               <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">
                                 NIS: {student.nis}
                               </span>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className="bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.2 rounded border border-emerald-200 dark:border-emerald-800 text-[10px] font-bold">
                                   Kelas {student.classRoom}
                                 </span>
-                                <span className="text-[10px] text-slate-500">{student.gender}</span>
+                                <span className="text-[10px] text-slate-500 font-medium">
+                                  {student.gender === 'Laki-laki' ? 'L' : 'P'}
+                                </span>
                               </div>
                               {student.parentPhone && (
                                 <span className="text-[9.5px] text-slate-400 truncate">
@@ -798,23 +932,48 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
                                 </span>
                               )}
                             </div>
-                            <div className="pt-1">
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 text-[9px] font-bold">
-                                <i className="fa-solid fa-qrcode text-[9px]"></i> Pindai saat presensi
+                            <div className="pt-0.5">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 text-[8.5px] font-bold">
+                                <i className="fa-solid fa-qrcode text-[8.5px]"></i> Pindai presensi
                               </span>
                             </div>
                           </div>
 
-                          {/* QR Code Right */}
+                          {/* 2. Student Photo Center */}
+                          <div className="shrink-0 flex flex-col items-center">
+                            <div className="w-14 sm:w-16 h-18 sm:h-20 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 border-2 border-indigo-200 dark:border-indigo-800 shadow-xs flex items-center justify-center relative">
+                              {photoMap[student.id] || student.photo || student.avatarUrl ? (
+                                <img
+                                  src={photoMap[student.id] || student.photo || student.avatarUrl}
+                                  alt={student.name}
+                                  className="w-full h-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                  onError={(e) => {
+                                    (e.target as HTMLElement).style.display = 'none';
+                                  }}
+                                />
+                              ) : (
+                                <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 bg-slate-100 dark:bg-slate-800 text-center p-1">
+                                  <i className="fa-solid fa-user text-xl mb-0.5"></i>
+                                  <span className="text-[8px] font-bold">FOTO</span>
+                                </div>
+                              )}
+                            </div>
+                            <span className="text-[8px] font-extrabold text-slate-400 dark:text-slate-500 mt-1 uppercase tracking-wider">
+                              PASFOTO
+                            </span>
+                          </div>
+
+                          {/* 3. QR Code Right */}
                           <div className="shrink-0 flex flex-col items-center p-1.5 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-200 dark:border-slate-700">
                             {qrUrl ? (
                               <img
                                 src={qrUrl}
                                 alt={`QR Code ${student.name}`}
-                                className="w-24 h-24 rounded-md bg-white p-1 border border-slate-900 shadow-xs"
+                                className="w-20 h-20 sm:w-22 sm:h-22 rounded-md bg-white p-1 border border-slate-900 shadow-xs"
                               />
                             ) : (
-                              <div className="w-24 h-24 rounded-md bg-slate-200 flex items-center justify-center text-[10px] text-slate-500">
+                              <div className="w-20 h-20 sm:w-22 sm:h-22 rounded-md bg-slate-200 flex items-center justify-center text-[10px] text-slate-500">
                                 Memuat QR...
                               </div>
                             )}
@@ -841,29 +1000,57 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
                             </div>
                           </div>
 
-                          {/* Extra Large High-Contrast QR Code */}
-                          <div className="flex flex-col items-center justify-center p-2 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-200 dark:border-slate-700">
-                            {qrUrl ? (
-                              <img
-                                src={qrUrl}
-                                alt={`QR Code ${student.name}`}
-                                className={`rounded-lg bg-white p-1.5 border-2 border-slate-900 shadow-md ${
-                                  layoutMode === '1_per_page'
-                                    ? 'w-48 h-48 sm:w-64 sm:h-64'
-                                    : layoutMode === '4_per_page'
-                                    ? 'w-36 h-36 sm:w-44 sm:h-44'
-                                    : 'w-28 h-28'
-                                }`}
-                              />
-                            ) : (
-                              <div className="w-36 h-36 rounded-lg bg-slate-200 flex items-center justify-center text-xs text-slate-500">
-                                Memuat QR...
+                          {/* Center: Student Photo & QR Code */}
+                          <div className="flex items-center justify-center gap-4">
+                            {/* Photo */}
+                            <div className="flex flex-col items-center">
+                              <div className="w-24 h-32 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 border-2 border-indigo-200 dark:border-indigo-800 shadow-md flex items-center justify-center relative">
+                                {photoMap[student.id] || student.photo || student.avatarUrl ? (
+                                  <img
+                                    src={photoMap[student.id] || student.photo || student.avatarUrl}
+                                    alt={student.name}
+                                    className="w-full h-full object-cover"
+                                    referrerPolicy="no-referrer"
+                                    onError={(e) => {
+                                      (e.target as HTMLElement).style.display = 'none';
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 bg-slate-100 dark:bg-slate-800 text-center p-2">
+                                    <i className="fa-solid fa-user text-3xl mb-1"></i>
+                                    <span className="text-[10px] font-bold">FOTO SISWA</span>
+                                  </div>
+                                )}
                               </div>
-                            )}
-                            <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300 mt-1.5 flex items-center gap-1">
-                              <i className="fa-solid fa-camera text-indigo-600 dark:text-indigo-400 text-xs"></i>
-                              <span>Arahkan ke Kamera Presensi</span>
-                            </span>
+                              <span className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 mt-1 uppercase">
+                                FOTO RESMI
+                              </span>
+                            </div>
+
+                            {/* Extra Large High-Contrast QR Code */}
+                            <div className="flex flex-col items-center justify-center p-2 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-200 dark:border-slate-700">
+                              {qrUrl ? (
+                                <img
+                                  src={qrUrl}
+                                  alt={`QR Code ${student.name}`}
+                                  className={`rounded-lg bg-white p-1.5 border-2 border-slate-900 shadow-md ${
+                                    layoutMode === '1_per_page'
+                                      ? 'w-44 h-44 sm:w-56 sm:h-56'
+                                      : layoutMode === '4_per_page'
+                                      ? 'w-32 h-32 sm:w-36 sm:h-36'
+                                      : 'w-26 h-26'
+                                  }`}
+                                />
+                              ) : (
+                                <div className="w-32 h-32 rounded-lg bg-slate-200 flex items-center justify-center text-xs text-slate-500">
+                                  Memuat QR...
+                                </div>
+                              )}
+                              <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300 mt-1.5 flex items-center gap-1">
+                                <i className="fa-solid fa-camera text-indigo-600 dark:text-indigo-400 text-xs"></i>
+                                <span>Pindai Kamera</span>
+                              </span>
+                            </div>
                           </div>
 
                           {/* Footer Details: WhatsApp & Cut Line indicator */}
