@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from 'react';
+import { jsPDF } from 'jspdf';
 import { Student, SystemSettings } from '../types';
 import { createStudentQRPayload, generateQRCodeDataURL } from '../utils/qr';
+import {
+  CardCustomizationOptions,
+  drawCustomizedCardPDF,
+} from '../utils/cardCustomization';
+import { CardCustomizationPanel } from './CardCustomizationPanel';
+import { StudentCardRenderer } from './StudentCardRenderer';
 
 interface StudentCardModalProps {
   student: Student;
@@ -14,6 +21,12 @@ export const StudentCardModal: React.FC<StudentCardModalProps> = ({
   onClose,
 }) => {
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [isExportingPDF, setIsExportingPDF] = useState<boolean>(false);
+  const [cardOptions, setCardOptions] = useState<CardCustomizationOptions>({
+    theme: 'wave',
+    color: 'blue',
+    font: 'sans',
+  });
 
   useEffect(() => {
     const payload = createStudentQRPayload(student);
@@ -24,149 +37,186 @@ export const StudentCardModal: React.FC<StudentCardModalProps> = ({
     window.print();
   };
 
+  const handleExportPDF = async () => {
+    setIsExportingPDF(true);
+    try {
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+
+      // Draw single card centered on A4 page
+      const cardWidth = 90;
+      const cardHeight = 62;
+      const x = (210 - cardWidth) / 2;
+      const y = (297 - cardHeight) / 2;
+
+      let photoDataUrl: string | undefined = undefined;
+      const photoSrc = student.photo || student.avatarUrl;
+      if (photoSrc) {
+        if (photoSrc.startsWith('data:image')) {
+          photoDataUrl = photoSrc;
+        } else {
+          try {
+            photoDataUrl = await new Promise((resolve) => {
+              const img = new Image();
+              img.crossOrigin = 'Anonymous';
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.naturalWidth || 160;
+                canvas.height = img.naturalHeight || 200;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                  ctx.drawImage(img, 0, 0);
+                  resolve(canvas.toDataURL('image/jpeg', 0.9));
+                } else {
+                  resolve(undefined);
+                }
+              };
+              img.onerror = () => resolve(undefined);
+              img.src = photoSrc;
+            });
+          } catch {
+            photoDataUrl = undefined;
+          }
+        }
+      }
+
+      drawCustomizedCardPDF(
+        doc,
+        x,
+        y,
+        cardWidth,
+        cardHeight,
+        student,
+        settings.schoolName,
+        photoDataUrl,
+        qrDataUrl,
+        cardOptions
+      );
+
+      const safeName = student.name.replace(/\s+/g, '_');
+      doc.save(`Kartu_Presensi_QR_${student.nis}_${safeName}.pdf`);
+    } catch (err) {
+      console.error('PDF export error:', err);
+      alert('Gagal mengekspor PDF kartu.');
+    } finally {
+      setIsExportingPDF(false);
+    }
+  };
+
   const handleDownloadQR = () => {
     if (!qrDataUrl) return;
     const link = document.createElement('a');
     link.href = qrDataUrl;
-    link.download = `QR_Siswa_${student.nis}_${student.name.replace(/\s+/g, '_')}.png`;
-    document.body.appendChild(link);
+    link.download = `QR_${student.nis}_${student.name.replace(/\s+/g, '_')}.png`;
     link.click();
-    document.body.removeChild(link);
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white border border-slate-200 rounded-3xl max-w-lg w-full p-6 shadow-2xl relative my-8 animate-scale-up">
-        <button
-          onClick={onClose}
-          className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 p-2 cursor-pointer no-print"
-        >
-          <i className="fa-solid fa-xmark text-lg"></i>
-        </button>
-
-        <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2 mb-4 no-print">
-          <i className="fa-solid fa-id-card text-indigo-600"></i>
-          <span>Pratinjau Kartu Pelajar Digital</span>
-        </h3>
-
-        {/* Printable Student Card Container */}
-        <div className="print-area bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl border-2 border-indigo-500/40 p-5 shadow-2xl relative overflow-hidden">
-          {/* Decorative background accent */}
-          <div className="absolute -right-12 -top-12 w-40 h-40 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none"></div>
-          <div className="absolute -left-12 -bottom-12 w-40 h-40 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
-
-          {/* Card Header / School Crest */}
-          <div className="border-b-2 border-indigo-500/30 pb-3 mb-4 text-center">
-            <div className="flex items-center justify-center gap-2.5 mb-1">
-              <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-md">
-                <i className="fa-solid fa-graduation-cap"></i>
-              </div>
-              <h4 className="font-black tracking-wider uppercase text-sm text-indigo-200">
-                {settings.schoolName}
-              </h4>
+    <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-3xl w-full flex flex-col shadow-2xl relative my-auto animate-scale-up overflow-hidden">
+        {/* Modal Header */}
+        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/80 dark:bg-slate-850 no-print">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-600 dark:bg-indigo-500 text-white flex items-center justify-center text-lg font-bold shadow-sm shadow-indigo-600/20">
+              <i className="fa-solid fa-id-card"></i>
             </div>
-            <p className="text-[10px] text-slate-300 font-medium">{settings.schoolAddress}</p>
-            <span className="inline-block mt-1 px-2 py-0.5 bg-indigo-500/20 text-indigo-300 rounded text-[9px] font-bold tracking-widest uppercase border border-indigo-500/30">
-              KARTU TANDA PELAJAR DIGITAL
-            </span>
-          </div>
-
-          {/* Card Body: Photo, Info, and QR Code */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
-            {/* Student Photo */}
-            <div className="flex flex-col items-center justify-center">
-              <img
-                src={student.photo || student.avatarUrl}
-                alt={student.name}
-                className="w-24 h-28 object-cover rounded-xl border-2 border-indigo-400 shadow-md ring-2 ring-indigo-500/20"
-              />
-              <span className="mt-1.5 text-[9px] font-mono text-indigo-300 bg-slate-900/80 px-2 py-0.5 rounded border border-slate-700">
-                {student.gender}
-              </span>
-            </div>
-
-            {/* Student Details */}
-            <div className="sm:col-span-2 space-y-2 text-left">
-              <div>
-                <span className="text-[9px] text-slate-400 uppercase tracking-wider block">
-                  Nama Lengkap
-                </span>
-                <span className="font-extrabold text-sm text-white block leading-tight">
-                  {student.name}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <span className="text-[9px] text-slate-400 uppercase tracking-wider block">
-                    NIS
-                  </span>
-                  <span className="font-mono font-bold text-xs text-amber-400">
-                    {student.nis}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[9px] text-slate-400 uppercase tracking-wider block">
-                    Kelas
-                  </span>
-                  <span className="font-bold text-xs text-emerald-400">
-                    {student.classRoom}
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <span className="text-[9px] text-slate-400 uppercase tracking-wider block">
-                  Kontak Ortu
-                </span>
-                <span className="font-mono text-xs text-slate-300">
-                  {student.parentPhone}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* QR Code Section */}
-          <div className="mt-4 pt-3 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-950/70 p-3.5 rounded-xl border border-slate-800/80">
-            <div className="text-center sm:text-left">
-              <span className="text-xs font-bold text-slate-200 block flex items-center justify-center sm:justify-start gap-1.5">
-                <i className="fa-solid fa-qrcode text-indigo-400"></i>
-                <span>KODE QR PRESENSI RESMI</span>
-              </span>
-              <p className="text-[10px] text-slate-400 max-w-[220px] mt-0.5">
-                Pindai kode QR ini dengan kamera scanner presensi saat siswa tiba di sekolah.
+            <div>
+              <h3 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white">
+                Kartu QR Digital Pelajar
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Pilih tema, warna, dan font sebelum mencetak atau mengunduh PDF.
               </p>
             </div>
-            {qrDataUrl ? (
-              <img
-                src={qrDataUrl}
-                alt={`QR ${student.name}`}
-                className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl border-2 border-white p-1.5 bg-white shadow-xl ring-2 ring-indigo-500/30 shrink-0"
-              />
-            ) : (
-              <div className="w-24 h-24 rounded-xl bg-slate-800 flex items-center justify-center text-xs text-slate-500">
-                Memuat QR...
-              </div>
-            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+            title="Tutup"
+          >
+            <i className="fa-solid fa-xmark text-lg"></i>
+          </button>
+        </div>
+
+        {/* Customization Toolbar */}
+        <CardCustomizationPanel
+          options={cardOptions}
+          onChange={setCardOptions}
+        />
+
+        {/* Card View Area */}
+        <div className="p-4 sm:p-6 bg-slate-100 dark:bg-slate-950 flex flex-col items-center justify-center overflow-y-auto">
+          {/* Printable container styling for browser print */}
+          <style>{`
+            @media print {
+              body * {
+                visibility: hidden;
+              }
+              #single-card-printable,
+              #single-card-printable * {
+                visibility: visible;
+              }
+              #single-card-printable {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                margin: 0;
+                padding: 0;
+                background: white !important;
+              }
+              .no-print {
+                display: none !important;
+              }
+              @page {
+                size: A4 portrait;
+                margin: 15mm;
+              }
+            }
+          `}</style>
+
+          <div id="single-card-printable" className="w-full max-w-xl">
+            <StudentCardRenderer
+              student={student}
+              settings={settings}
+              options={cardOptions}
+              qrUrl={qrDataUrl}
+              photoUrl={student.photo || student.avatarUrl}
+              showCheckbox={false}
+            />
           </div>
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center justify-end gap-3 mt-5 no-print">
+        <div className="p-4 sm:p-5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between bg-white dark:bg-slate-900 no-print">
           <button
             onClick={handleDownloadQR}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl border border-slate-200 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
           >
-            <i className="fa-solid fa-download text-indigo-600"></i>
-            <span>Unduh QR</span>
+            <i className="fa-solid fa-download text-indigo-600 dark:text-indigo-400"></i>
+            <span>Unduh File QR</span>
           </button>
-          <button
-            onClick={handlePrint}
-            className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
-          >
-            <i className="fa-solid fa-print"></i>
-            <span>Cetak Kartu</span>
-          </button>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExportPDF}
+              disabled={isExportingPDF}
+              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
+            >
+              <i className={`fa-solid ${isExportingPDF ? 'fa-spinner fa-spin' : 'fa-file-pdf'}`}></i>
+              <span>{isExportingPDF ? 'Membuat PDF...' : 'Unduh PDF Kartu'}</span>
+            </button>
+            <button
+              onClick={handlePrint}
+              className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
+            >
+              <i className="fa-solid fa-print"></i>
+              <span>Cetak Kartu</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

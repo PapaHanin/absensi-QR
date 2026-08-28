@@ -51,7 +51,6 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
   const [bulkPrintSelectedIds, setBulkPrintSelectedIds] = useState<string[] | undefined>(undefined);
-  const [bulkPrintLayout, setBulkPrintLayout] = useState<'1_per_page' | '4_per_page' | '6_per_page' | '8_per_page'>('8_per_page');
   const headerCheckboxRef = useRef<HTMLInputElement | null>(null);
 
   // Behavior & Leave Modals in StudentsTab
@@ -225,13 +224,11 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
       return;
     }
     setBulkPrintSelectedIds(Array.from(selectedStudentIds));
-    setBulkPrintLayout('8_per_page');
     setIsBulkPrintModalOpen(true);
   };
 
   const handleOpenBulkPrintAll = () => {
     setBulkPrintSelectedIds(undefined);
-    setBulkPrintLayout('8_per_page');
     setIsBulkPrintModalOpen(true);
   };
 
@@ -1319,7 +1316,6 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
           currentTeacher={currentTeacher}
           initialClass={effectiveClass}
           initialSelectedIds={bulkPrintSelectedIds}
-          initialLayout={bulkPrintLayout}
           onClose={() => {
             setIsBulkPrintModalOpen(false);
             setBulkPrintSelectedIds(undefined);
