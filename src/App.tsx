@@ -53,6 +53,7 @@ import {
   deleteBehaviorLogFromFirestore,
   seedInitialFirestoreDataIfEmpty,
 } from './services/firestoreService';
+import { safeSetItem, safeGetItem, safeRemoveItem, cleanStaleLocalStorage } from './utils/storage';
 
 const LOCAL_STORAGE_KEYS = {
   STUDENTS: 'absensi_siswa_students_v2',
@@ -68,10 +69,15 @@ export default function App() {
   const todayStr = getTodayDateString();
   const isInitialMount = useRef(true);
 
+  // Run cleanup once on startup to remove legacy keys and reclaim quota space
+  useEffect(() => {
+    cleanStaleLocalStorage();
+  }, []);
+
   // Settings state with safe JSON parse
   const [settings, setSettings] = useState<SystemSettings>(() => {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.SETTINGS);
+      const saved = safeGetItem(LOCAL_STORAGE_KEYS.SETTINGS);
       return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
     } catch (e) {
       console.warn('Failed to parse settings from localStorage:', e);
@@ -82,12 +88,12 @@ export default function App() {
   // Students state with safe JSON parse
   const [students, setStudents] = useState<Student[]>(() => {
     try {
-      if (localStorage.getItem('absensi_siswa_students_v1')) {
-        localStorage.removeItem('absensi_siswa_students_v1');
-        localStorage.removeItem('absensi_siswa_attendance_v1');
+      if (safeGetItem('absensi_siswa_students_v1')) {
+        safeRemoveItem('absensi_siswa_students_v1');
+        safeRemoveItem('absensi_siswa_attendance_v1');
       }
 
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.STUDENTS);
+      const saved = safeGetItem(LOCAL_STORAGE_KEYS.STUDENTS);
       const parsed: Student[] = saved ? JSON.parse(saved) : INITIAL_STUDENTS;
 
       const filtered = parsed.filter(
@@ -112,7 +118,7 @@ export default function App() {
   // Attendance Records state with safe JSON parse
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(() => {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.ATTENDANCE);
+      const saved = safeGetItem(LOCAL_STORAGE_KEYS.ATTENDANCE);
       const parsed: AttendanceRecord[] = saved ? JSON.parse(saved) : generateInitialAttendance(todayStr);
       return parsed.filter(
         (r) => !['std-1001', 'std-1002', 'std-1003', 'std-1004', 'std-1005', 'std-1006', 'std-1007', 'std-1008', 'std-1009', 'std-1010', 'std-1011', 'std-1012', 'std-1013', 'std-1014'].includes(r.studentId)
@@ -126,12 +132,12 @@ export default function App() {
   // Teachers state with safe JSON parse
   const [teachers, setTeachers] = useState<Teacher[]>(() => {
     try {
-      if (localStorage.getItem('absensi_siswa_teachers_v1')) {
-        localStorage.removeItem('absensi_siswa_teachers_v1');
-        localStorage.removeItem('absensi_siswa_current_teacher_v1');
+      if (safeGetItem('absensi_siswa_teachers_v1')) {
+        safeRemoveItem('absensi_siswa_teachers_v1');
+        safeRemoveItem('absensi_siswa_current_teacher_v1');
       }
 
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.TEACHERS);
+      const saved = safeGetItem(LOCAL_STORAGE_KEYS.TEACHERS);
       if (!saved) return INITIAL_TEACHERS;
 
       const parsed: Teacher[] = JSON.parse(saved);
@@ -156,7 +162,7 @@ export default function App() {
   // Scheduled Leaves (Izin / Sakit Terjadwal) state
   const [scheduledLeaves, setScheduledLeaves] = useState<ScheduledLeave[]>(() => {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.LEAVES);
+      const saved = safeGetItem(LOCAL_STORAGE_KEYS.LEAVES);
       return saved ? JSON.parse(saved) : [];
     } catch (e) {
       console.warn('Failed to parse leaves from localStorage:', e);
@@ -167,7 +173,7 @@ export default function App() {
   // Student Behavior & Character Logs state
   const [behaviorLogs, setBehaviorLogs] = useState<BehaviorLog[]>(() => {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.BEHAVIOR_LOGS);
+      const saved = safeGetItem(LOCAL_STORAGE_KEYS.BEHAVIOR_LOGS);
       return saved ? JSON.parse(saved) : [];
     } catch (e) {
       console.warn('Failed to parse behavior logs from localStorage:', e);
@@ -178,7 +184,7 @@ export default function App() {
   // Currently logged-in Teacher (null by default for guest / shared sessions until login)
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(() => {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.CURRENT_TEACHER);
+      const saved = safeGetItem(LOCAL_STORAGE_KEYS.CURRENT_TEACHER);
       if (!saved) return null;
       const parsed: Teacher = JSON.parse(saved);
       return parsed && parsed.id ? parsed : null;
@@ -198,7 +204,7 @@ export default function App() {
   // Dark / Light Theme Mode
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     try {
-      const savedTheme = localStorage.getItem('app_theme_mode');
+      const savedTheme = safeGetItem('app_theme_mode');
       if (savedTheme) {
         return savedTheme === 'dark';
       }
@@ -213,10 +219,10 @@ export default function App() {
     try {
       if (isDarkMode) {
         document.documentElement.classList.add('dark');
-        localStorage.setItem('app_theme_mode', 'dark');
+        safeSetItem('app_theme_mode', 'dark');
       } else {
         document.documentElement.classList.remove('dark');
-        localStorage.setItem('app_theme_mode', 'light');
+        safeSetItem('app_theme_mode', 'light');
       }
     } catch (e) {
       console.warn('Failed to sync theme class:', e);
@@ -247,42 +253,44 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // Save to LocalStorage whenever states update (fast local cache)
+  // Save to LocalStorage whenever states update (fast local cache with quota management)
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+    safeSetItem(LOCAL_STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
   }, [settings]);
 
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(students));
+    safeSetItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(students));
   }, [students]);
 
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEYS.ATTENDANCE, JSON.stringify(attendanceRecords));
+    safeSetItem(LOCAL_STORAGE_KEYS.ATTENDANCE, JSON.stringify(attendanceRecords));
   }, [attendanceRecords]);
 
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEYS.TEACHERS, JSON.stringify(teachers));
+    safeSetItem(LOCAL_STORAGE_KEYS.TEACHERS, JSON.stringify(teachers));
   }, [teachers]);
 
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEYS.LEAVES, JSON.stringify(scheduledLeaves));
+    safeSetItem(LOCAL_STORAGE_KEYS.LEAVES, JSON.stringify(scheduledLeaves));
   }, [scheduledLeaves]);
 
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEYS.BEHAVIOR_LOGS, JSON.stringify(behaviorLogs));
+    safeSetItem(LOCAL_STORAGE_KEYS.BEHAVIOR_LOGS, JSON.stringify(behaviorLogs));
   }, [behaviorLogs]);
 
   useEffect(() => {
     if (currentTeacher) {
-      localStorage.setItem(LOCAL_STORAGE_KEYS.CURRENT_TEACHER, JSON.stringify(currentTeacher));
+      safeSetItem(LOCAL_STORAGE_KEYS.CURRENT_TEACHER, JSON.stringify(currentTeacher));
     } else {
-      localStorage.removeItem(LOCAL_STORAGE_KEYS.CURRENT_TEACHER);
+      safeRemoveItem(LOCAL_STORAGE_KEYS.CURRENT_TEACHER);
     }
   }, [currentTeacher]);
 
   // Real-time Firestore synchronization & Initial Connection
   useEffect(() => {
-    testFirestoreConnection();
+    testFirestoreConnection().catch((err) => {
+      console.warn('Firestore connection notice:', err);
+    });
 
     // Seed initial data to Firestore if completely empty
     seedInitialFirestoreDataIfEmpty(
@@ -290,7 +298,9 @@ export default function App() {
       INITIAL_TEACHERS,
       DEFAULT_SETTINGS,
       generateInitialAttendance(todayStr)
-    );
+    ).catch((err) => {
+      console.warn('Firestore initial data check notice:', err);
+    });
 
     // Subscribe to Firestore collections in real-time
     const unsubStudents = subscribeToStudents((fsStudents) => {
@@ -365,7 +375,7 @@ export default function App() {
   const handleTeacherLogout = () => {
     const prevName = currentTeacher?.name || 'Pengguna';
     setCurrentTeacher(null);
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.CURRENT_TEACHER);
+    safeRemoveItem(LOCAL_STORAGE_KEYS.CURRENT_TEACHER);
     addToast('Berhasil Keluar', `Anda telah keluar dari akun ${prevName}.`, 'info');
   };
 
@@ -724,11 +734,11 @@ export default function App() {
     const initAtt = generateInitialAttendance(getTodayDateString());
     setAttendanceRecords(initAtt);
     setSettings(DEFAULT_SETTINGS);
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.STUDENTS);
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.ATTENDANCE);
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.SETTINGS);
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.TEACHERS);
-    localStorage.removeItem(LOCAL_STORAGE_KEYS.CURRENT_TEACHER);
+    safeRemoveItem(LOCAL_STORAGE_KEYS.STUDENTS);
+    safeRemoveItem(LOCAL_STORAGE_KEYS.ATTENDANCE);
+    safeRemoveItem(LOCAL_STORAGE_KEYS.SETTINGS);
+    safeRemoveItem(LOCAL_STORAGE_KEYS.TEACHERS);
+    safeRemoveItem(LOCAL_STORAGE_KEYS.CURRENT_TEACHER);
 
     // Sync reset to Firestore
     syncAllStudentsToFirestore(INITIAL_STUDENTS).catch((e) => console.warn(e));

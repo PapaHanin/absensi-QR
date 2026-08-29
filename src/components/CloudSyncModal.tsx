@@ -5,6 +5,7 @@ import { saveToCloudSync, fetchFromCloudSync, generateSyncCode } from '../utils/
 import { exportFullBackupJSON, exportAttendanceToCSV, exportStudentsToCSV } from '../utils/csv';
 import { googleSignIn, googleLogout, initAuth } from '../utils/googleAuth';
 import { createGoogleSpreadsheet, exportToGoogleSheets } from '../utils/googleSheets';
+import { safeSetItem, safeGetItem } from '../utils/storage';
 
 interface CloudSyncModalProps {
   students: Student[];
@@ -30,16 +31,16 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   onClose,
   onShowToast,
 }) => {
-  const [activeTab, setActiveTab] = useState<'sync' | 'gsheets' | 'backup' | 'restore'>('gsheets');
+  const [activeTab, setActiveTab] = useState<'sync' | 'gsheets' | 'backup' | 'restore'>('sync');
 
   // Google Sheets state
   const [googleUser, setGoogleUser] = useState<User | null>(null);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [spreadsheetId, setSpreadsheetId] = useState<string>(() => {
-    return localStorage.getItem('absensi_google_spreadsheet_id') || '';
+    return safeGetItem('absensi_google_spreadsheet_id') || '';
   });
   const [spreadsheetUrl, setSpreadsheetUrl] = useState<string>(() => {
-    return localStorage.getItem('absensi_google_spreadsheet_url') || '';
+    return safeGetItem('absensi_google_spreadsheet_url') || '';
   });
   const [isExportingSheets, setIsExportingSheets] = useState(false);
   const [isCreatingSheet, setIsCreatingSheet] = useState(false);
@@ -64,12 +65,12 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
 
   // Existing sync code or generate a new one
   const [syncCode, setSyncCode] = useState<string>(() => {
-    return localStorage.getItem('absensi_active_sync_code') || generateSyncCode();
+    return safeGetItem('absensi_active_sync_code') || generateSyncCode();
   });
 
   const [inputSyncCode, setInputSyncCode] = useState<string>('');
   const [lastSyncTime, setLastSyncTime] = useState<string>(() => {
-    return localStorage.getItem('absensi_last_cloud_sync_time') || 'Belum pernah disinkronkan';
+    return safeGetItem('absensi_last_cloud_sync_time') || 'Belum pernah disinkronkan';
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -114,8 +115,8 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       const result = await createGoogleSpreadsheet(googleAccessToken, title);
       setSpreadsheetId(result.spreadsheetId);
       setSpreadsheetUrl(result.spreadsheetUrl);
-      localStorage.setItem('absensi_google_spreadsheet_id', result.spreadsheetId);
-      localStorage.setItem('absensi_google_spreadsheet_url', result.spreadsheetUrl);
+      safeSetItem('absensi_google_spreadsheet_id', result.spreadsheetId);
+      safeSetItem('absensi_google_spreadsheet_url', result.spreadsheetUrl);
       onShowToast('Spreadsheet Dibuat', 'Google Spreadsheet baru berhasil dibuat di Google Drive Anda!', 'success');
     } catch (err: any) {
       console.error('Error creating spreadsheet:', err);
@@ -155,9 +156,9 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       if (res.success) {
         if (res.spreadsheetUrl) {
           setSpreadsheetUrl(res.spreadsheetUrl);
-          localStorage.setItem('absensi_google_spreadsheet_url', res.spreadsheetUrl);
+          safeSetItem('absensi_google_spreadsheet_url', res.spreadsheetUrl);
         }
-        localStorage.setItem('absensi_google_spreadsheet_id', spreadsheetId.trim());
+        safeSetItem('absensi_google_spreadsheet_id', spreadsheetId.trim());
         onShowToast('Ekspor Google Sheets Berhasil!', res.message, 'success');
       } else {
         onShowToast('Gagal Ekspor Google Sheets', res.message, 'error');
@@ -210,8 +211,8 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
           settings: result.payload.settings || settings,
           teachers: result.payload.teachers || teachers,
         });
-        localStorage.setItem('absensi_active_sync_code', result.payload.syncCode);
-        localStorage.setItem('absensi_last_cloud_sync_time', result.payload.lastSyncedAt);
+        safeSetItem('absensi_active_sync_code', result.payload.syncCode);
+        safeSetItem('absensi_last_cloud_sync_time', result.payload.lastSyncedAt);
         setSyncCode(result.payload.syncCode);
         setLastSyncTime(result.payload.lastSyncedAt);
         onShowToast('Restorasi Cloud Berhasil', result.message, 'success');
@@ -289,15 +290,6 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
         {/* Tab Selection */}
         <div className="flex p-1 bg-slate-100 rounded-2xl gap-1 text-xs font-bold text-slate-600">
           <button
-            onClick={() => setActiveTab('gsheets')}
-            className={`flex-1 py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-              activeTab === 'gsheets' ? 'bg-white text-emerald-600 shadow-xs' : 'hover:text-slate-900'
-            }`}
-          >
-            <i className="fa-solid fa-file-csv text-emerald-600"></i>
-            <span>Google Sheets</span>
-          </button>
-          <button
             onClick={() => setActiveTab('sync')}
             className={`flex-1 py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
               activeTab === 'sync' ? 'bg-white text-indigo-600 shadow-xs' : 'hover:text-slate-900'
@@ -305,6 +297,15 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
           >
             <i className="fa-solid fa-rotate"></i>
             <span>Sinkron Cloud</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('gsheets')}
+            className={`flex-1 py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              activeTab === 'gsheets' ? 'bg-white text-emerald-600 shadow-xs' : 'hover:text-slate-900'
+            }`}
+          >
+            <i className="fa-solid fa-file-csv text-emerald-600"></i>
+            <span>Google Sheets</span>
           </button>
           <button
             onClick={() => setActiveTab('backup')}

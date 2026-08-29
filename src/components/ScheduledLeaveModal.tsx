@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Student, ScheduledLeave, LeaveType, SystemSettings, Teacher, AttendanceStatus } from '../types';
 import { isHomeroomClassMatch, formatClassLabel } from '../utils/classUtils';
 import { formatPhoneNumberForWA, generateWALeaveMessage } from '../utils/whatsapp';
+import { compressLeaveLetter } from '../utils/imageCompressor';
 
 interface ScheduledLeaveModalProps {
   students: Student[];
@@ -47,6 +48,7 @@ export const ScheduledLeaveModal: React.FC<ScheduledLeaveModalProps> = ({
   const [reason, setReason] = useState<string>('');
   const [attachmentPhoto, setAttachmentPhoto] = useState<string>('');
   const [autoPopulate, setAutoPopulate] = useState<boolean>(true);
+  const [isCompressingPhoto, setIsCompressingPhoto] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
 
@@ -81,21 +83,26 @@ export const ScheduledLeaveModal: React.FC<ScheduledLeaveModalProps> = ({
     return diffDays > 0 ? diffDays : 1;
   }, [startDate, endDate]);
 
-  // Handle Photo Upload
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle Photo Upload with Auto-Compression
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 3 * 1024 * 1024) {
-      alert('Ukuran file foto maksimal 3MB.');
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Ukuran file foto maksimal 10MB.');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setAttachmentPhoto(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    setIsCompressingPhoto(true);
+    try {
+      const compressed = await compressLeaveLetter(file);
+      setAttachmentPhoto(compressed);
+    } catch (err) {
+      console.error('Error compressing leave letter attachment:', err);
+      alert('Gagal memproses gambar surat izin. Silakan coba file lain.');
+    } finally {
+      setIsCompressingPhoto(false);
+    }
   };
 
   // Submit Leave Form
@@ -410,12 +417,22 @@ export const ScheduledLeaveModal: React.FC<ScheduledLeaveModalProps> = ({
                   </label>
 
                   <div className="flex flex-col sm:flex-row items-center gap-3">
-                    <label className="flex-1 w-full flex items-center justify-center gap-2 p-3.5 border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-indigo-500 rounded-2xl bg-slate-50/50 dark:bg-slate-800/40 text-xs text-slate-600 dark:text-slate-300 font-semibold cursor-pointer transition-all">
-                      <i className="fa-solid fa-cloud-arrow-up text-indigo-600 text-sm"></i>
-                      <span>{attachmentPhoto ? 'Ganti Foto Surat Bukti' : 'Pilih Foto Surat Dokter / Izin (JPG/PNG)'}</span>
+                    <label className={`flex-1 w-full flex items-center justify-center gap-2 p-3.5 border-2 border-dashed ${isCompressingPhoto ? 'border-indigo-400 bg-indigo-50/30' : 'border-slate-300 dark:border-slate-700 hover:border-indigo-500 bg-slate-50/50 dark:bg-slate-800/40'} rounded-2xl text-xs text-slate-600 dark:text-slate-300 font-semibold cursor-pointer transition-all`}>
+                      {isCompressingPhoto ? (
+                        <>
+                          <i className="fa-solid fa-spinner fa-spin text-indigo-600 text-sm"></i>
+                          <span>Mengompres Foto Bukti Surat...</span>
+                        </>
+                      ) : (
+                        <>
+                          <i className="fa-solid fa-cloud-arrow-up text-indigo-600 text-sm"></i>
+                          <span>{attachmentPhoto ? 'Ganti Foto Surat Bukti (Auto-Kompres)' : 'Pilih Foto Surat Dokter / Izin (Auto-Kompres Hemat Data)'}</span>
+                        </>
+                      )}
                       <input
                         type="file"
                         accept="image/*"
+                        disabled={isCompressingPhoto}
                         onChange={handlePhotoUpload}
                         className="hidden"
                       />

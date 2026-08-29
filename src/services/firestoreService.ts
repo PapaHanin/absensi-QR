@@ -3,6 +3,7 @@ import {
   doc,
   setDoc,
   deleteDoc,
+  getDoc,
   onSnapshot,
   getDocs,
   writeBatch,
@@ -10,6 +11,17 @@ import {
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Student, AttendanceRecord, SystemSettings, Teacher, ScheduledLeave, BehaviorLog } from '../types';
 import { CloudSyncPayload } from '../utils/cloudSync';
+
+/**
+ * Sanitizes an object by converting undefined values to null or stripping them,
+ * preventing Firestore "Unsupported field value: undefined" errors.
+ */
+export function sanitizeForFirestore<T>(obj: T): T {
+  if (!obj) return obj;
+  return JSON.parse(
+    JSON.stringify(obj, (_, value) => (value === undefined ? null : value))
+  );
+}
 
 // Collection Names
 export const COLLECTIONS = {
@@ -52,7 +64,7 @@ export function subscribeToStudents(
 export async function saveStudentToFirestore(student: Student): Promise<void> {
   const path = `${COLLECTIONS.STUDENTS}/${student.id}`;
   try {
-    await setDoc(doc(db, COLLECTIONS.STUDENTS, student.id), student);
+    await setDoc(doc(db, COLLECTIONS.STUDENTS, student.id), sanitizeForFirestore(student));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -87,15 +99,57 @@ export async function bulkDeleteStudentsFromFirestore(studentIds: string[]): Pro
 }
 
 /**
- * Bulk saves or overwrites students in Firestore
+ * Bulk saves or overwrites students in Firestore in safe chunks (max 450 items per Firestore batch)
  */
 export async function syncAllStudentsToFirestore(students: Student[]): Promise<void> {
   const path = COLLECTIONS.STUDENTS;
   try {
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < students.length; i += CHUNK_SIZE) {
+      const chunk = students.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach((std) => {
+        const ref = doc(db, COLLECTIONS.STUDENTS, std.id);
+        batch.set(ref, sanitizeForFirestore(std));
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/**
+ * Bulk saves attendance records in safe chunks (max 400 per batch)
+ */
+export async function syncAllAttendanceToFirestore(records: AttendanceRecord[]): Promise<void> {
+  const path = COLLECTIONS.ATTENDANCE;
+  try {
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+      const chunk = records.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach((att) => {
+        const ref = doc(db, COLLECTIONS.ATTENDANCE, att.id);
+        batch.set(ref, sanitizeForFirestore(att));
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/**
+ * Bulk saves teachers in a single batch
+ */
+export async function syncAllTeachersToFirestore(teachers: Teacher[]): Promise<void> {
+  const path = COLLECTIONS.TEACHERS;
+  try {
     const batch = writeBatch(db);
-    students.forEach((std) => {
-      const ref = doc(db, COLLECTIONS.STUDENTS, std.id);
-      batch.set(ref, std);
+    teachers.forEach((t) => {
+      const ref = doc(db, COLLECTIONS.TEACHERS, t.id);
+      batch.set(ref, sanitizeForFirestore(t));
     });
     await batch.commit();
   } catch (error) {
@@ -133,7 +187,7 @@ export function subscribeToAttendance(
 export async function saveAttendanceToFirestore(record: AttendanceRecord): Promise<void> {
   const path = `${COLLECTIONS.ATTENDANCE}/${record.id}`;
   try {
-    await setDoc(doc(db, COLLECTIONS.ATTENDANCE, record.id), record);
+    await setDoc(doc(db, COLLECTIONS.ATTENDANCE, record.id), sanitizeForFirestore(record));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -181,7 +235,7 @@ export function subscribeToTeachers(
 export async function saveTeacherToFirestore(teacher: Teacher): Promise<void> {
   const path = `${COLLECTIONS.TEACHERS}/${teacher.id}`;
   try {
-    await setDoc(doc(db, COLLECTIONS.TEACHERS, teacher.id), teacher);
+    await setDoc(doc(db, COLLECTIONS.TEACHERS, teacher.id), sanitizeForFirestore(teacher));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -227,7 +281,7 @@ export function subscribeToSettings(
 export async function saveSettingsToFirestore(settings: SystemSettings): Promise<void> {
   const path = `${COLLECTIONS.SETTINGS}/school`;
   try {
-    await setDoc(doc(db, COLLECTIONS.SETTINGS, 'school'), settings);
+    await setDoc(doc(db, COLLECTIONS.SETTINGS, 'school'), sanitizeForFirestore(settings));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -240,7 +294,7 @@ export async function saveCloudSyncToFirestore(payload: CloudSyncPayload): Promi
   const cleanCode = payload.syncCode.trim().toUpperCase();
   const path = `${COLLECTIONS.CLOUD_SYNC}/${cleanCode}`;
   try {
-    await setDoc(doc(db, COLLECTIONS.CLOUD_SYNC, cleanCode), payload);
+    await setDoc(doc(db, COLLECTIONS.CLOUD_SYNC, cleanCode), sanitizeForFirestore(payload));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -253,6 +307,13 @@ export async function fetchCloudSyncFromFirestore(syncCode: string): Promise<Clo
   const cleanCode = syncCode.trim().toUpperCase();
   const path = `${COLLECTIONS.CLOUD_SYNC}/${cleanCode}`;
   try {
+    // Direct document fetch first
+    const docSnap = await getDoc(doc(db, COLLECTIONS.CLOUD_SYNC, cleanCode));
+    if (docSnap.exists()) {
+      return docSnap.data() as CloudSyncPayload;
+    }
+
+    // Fallback search across collection
     const snapshot = await getDocs(collection(db, COLLECTIONS.CLOUD_SYNC));
     let found: CloudSyncPayload | null = null;
     snapshot.forEach((d) => {
@@ -296,7 +357,7 @@ export function subscribeToLeaves(
 export async function saveLeaveToFirestore(leave: ScheduledLeave): Promise<void> {
   const path = `${COLLECTIONS.LEAVES}/${leave.id}`;
   try {
-    await setDoc(doc(db, COLLECTIONS.LEAVES, leave.id), leave);
+    await setDoc(doc(db, COLLECTIONS.LEAVES, leave.id), sanitizeForFirestore(leave));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -344,7 +405,7 @@ export function subscribeToBehaviorLogs(
 export async function saveBehaviorLogToFirestore(log: BehaviorLog): Promise<void> {
   const path = `${COLLECTIONS.BEHAVIOR_LOGS}/${log.id}`;
   try {
-    await setDoc(doc(db, COLLECTIONS.BEHAVIOR_LOGS, log.id), log);
+    await setDoc(doc(db, COLLECTIONS.BEHAVIOR_LOGS, log.id), sanitizeForFirestore(log));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }

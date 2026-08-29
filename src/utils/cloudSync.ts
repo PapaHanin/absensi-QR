@@ -2,7 +2,12 @@ import { Student, AttendanceRecord, SystemSettings, Teacher } from '../types';
 import {
   saveCloudSyncToFirestore,
   fetchCloudSyncFromFirestore,
+  syncAllStudentsToFirestore,
+  syncAllAttendanceToFirestore,
+  syncAllTeachersToFirestore,
+  saveSettingsToFirestore,
 } from '../services/firestoreService';
+import { safeSetItem, safeGetItem } from './storage';
 
 export interface CloudSyncPayload {
   syncCode: string;
@@ -41,6 +46,8 @@ export const saveToCloudSync = async (
   }
 ): Promise<{ success: boolean; syncedAt: string; message: string }> => {
   try {
+    const cleanCode = (syncCode || generateSyncCode()).trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '') || generateSyncCode();
+    
     const syncedAt = new Date().toLocaleString('id-ID', {
       day: '2-digit',
       month: 'short',
@@ -50,38 +57,65 @@ export const saveToCloudSync = async (
     });
 
     const payload: CloudSyncPayload = {
-      syncCode: syncCode.trim().toUpperCase(),
+      syncCode: cleanCode,
       lastSyncedAt: syncedAt,
-      schoolName: data.settings.schoolName,
-      students: data.students,
-      attendanceRecords: data.attendanceRecords,
-      settings: data.settings,
-      teachers: data.teachers,
+      schoolName: data.settings?.schoolName || 'SD Negeri',
+      students: Array.isArray(data.students) ? data.students : [],
+      attendanceRecords: Array.isArray(data.attendanceRecords) ? data.attendanceRecords : [],
+      settings: data.settings || {
+        lateCutoffTime: '07:00',
+        schoolName: 'SD Negeri',
+        schoolAddress: '',
+        academicYear: '2024/2025',
+      },
+      teachers: Array.isArray(data.teachers) ? data.teachers : [],
     };
 
-    // Store in browser local storage as cache
-    localStorage.setItem(`${CLOUD_STORAGE_KEY_PREFIX}${payload.syncCode}`, JSON.stringify(payload));
-    localStorage.setItem('absensi_active_sync_code', payload.syncCode);
-    localStorage.setItem('absensi_last_cloud_sync_time', syncedAt);
+    // Store in browser local storage as cache (safely handled against quota)
+    safeSetItem(`${CLOUD_STORAGE_KEY_PREFIX}${payload.syncCode}`, JSON.stringify(payload));
+    safeSetItem('absensi_active_sync_code', payload.syncCode);
+    safeSetItem('absensi_last_cloud_sync_time', syncedAt);
 
-    // Save to Firestore Cloud Database
+    // Save snapshot to Firestore Cloud Database
+    let firestoreSuccess = false;
     try {
       await saveCloudSyncToFirestore(payload);
+      
+      // Propagate data in parallel high-speed batches to main Firestore collections
+      const syncTasks: Promise<void>[] = [];
+
+      if (payload.students.length > 0) {
+        syncTasks.push(syncAllStudentsToFirestore(payload.students));
+      }
+      if (payload.settings) {
+        syncTasks.push(saveSettingsToFirestore(payload.settings));
+      }
+      if (payload.teachers.length > 0) {
+        syncTasks.push(syncAllTeachersToFirestore(payload.teachers));
+      }
+      if (payload.attendanceRecords.length > 0) {
+        syncTasks.push(syncAllAttendanceToFirestore(payload.attendanceRecords));
+      }
+
+      await Promise.all(syncTasks);
+      firestoreSuccess = true;
     } catch (fsErr) {
-      console.warn('Saved locally, Firestore sync error:', fsErr);
+      console.warn('Firestore primary sync warning:', fsErr);
     }
 
     return {
       success: true,
       syncedAt,
-      message: `Data berhasil disinkronkan ke Firebase Cloud dengan Kode Sync: ${payload.syncCode}`,
+      message: firestoreSuccess
+        ? `Sinkronisasi Cloud Berhasil! (${payload.students.length} Siswa, ${payload.attendanceRecords.length} Rekap Absensi tersimpan ke Firestore dengan Kode Sync: ${payload.syncCode})`
+        : `Data tersimpan ke penyimpanan sinkronisasi lokal & siap terhubung ke Cloud (Kode: ${payload.syncCode})`,
     };
-  } catch (err) {
+  } catch (err: any) {
     console.error('Cloud sync failed:', err);
     return {
       success: false,
       syncedAt: '',
-      message: 'Gagal melakukan sinkronisasi cloud. Periksa koneksi internet Anda.',
+      message: `Gagal melakukan sinkronisasi cloud: ${err?.message || 'Periksa koneksi internet Anda.'}`,
     };
   }
 };
@@ -92,29 +126,36 @@ export const saveToCloudSync = async (
 export const fetchFromCloudSync = async (
   syncCode: string
 ): Promise<{ success: boolean; payload?: CloudSyncPayload; message: string }> => {
-  const cleanCode = syncCode.trim().toUpperCase();
+  const cleanCode = syncCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+
+  if (!cleanCode) {
+    return {
+      success: false,
+      message: 'Kode Sync tidak boleh kosong.',
+    };
+  }
 
   // Try Firestore first
   try {
     const firestorePayload = await fetchCloudSyncFromFirestore(cleanCode);
-    if (firestorePayload && firestorePayload.students) {
+    if (firestorePayload && Array.isArray(firestorePayload.students)) {
       return {
         success: true,
         payload: firestorePayload,
-        message: `Berhasil memuat data dari Firebase Cloud (${firestorePayload.students.length} Siswa, ${firestorePayload.attendanceRecords.length} Catatan Absensi)`,
+        message: `Berhasil memuat data dari Firebase Cloud (${firestorePayload.students.length} Siswa, ${firestorePayload.attendanceRecords?.length || 0} Catatan Absensi)`,
       };
     }
   } catch (fsErr) {
-    console.warn('Firestore fetch failed, checking local cache:', fsErr);
+    console.warn('Firestore fetch notice, checking local backup:', fsErr);
   }
 
   // Fallback to local storage
   try {
-    const raw = localStorage.getItem(`${CLOUD_STORAGE_KEY_PREFIX}${cleanCode}`);
+    const raw = safeGetItem(`${CLOUD_STORAGE_KEY_PREFIX}${cleanCode}`);
     if (!raw) {
       return {
         success: false,
-        message: `Kode Sync "${cleanCode}" tidak ditemukan di Firebase Cloud Storage. Pastikan kode benar.`,
+        message: `Kode Sync "${cleanCode}" tidak ditemukan di Firebase Cloud Storage. Pastikan kode sudah benar.`,
       };
     }
 
@@ -131,11 +172,11 @@ export const fetchFromCloudSync = async (
       payload,
       message: `Berhasil memuat data dari Cadangan Lokal (${payload.students.length} Siswa, ${payload.attendanceRecords.length} Catatan Absensi)`,
     };
-  } catch (err) {
+  } catch (err: any) {
     console.error('Failed to load from cloud:', err);
     return {
       success: false,
-      message: 'Gagal memproses data dari Cloud Sync.',
+      message: `Gagal memproses data dari Cloud Sync: ${err?.message || 'Format tidak valid'}`,
     };
   }
 };

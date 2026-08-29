@@ -8,6 +8,7 @@ import { exportStudentsToCSV, downloadStudentImportTemplateCSV, parseStudentImpo
 import { downloadStudentImportTemplateExcel, parseStudentExcelFile } from '../utils/excel';
 import { formatPhoneNumberForWA } from '../utils/whatsapp';
 import { isHomeroomClassMatch, formatClassLabel } from '../utils/classUtils';
+import { compressStudentPhoto } from '../utils/imageCompressor';
 import { ScheduledLeaveModal } from './ScheduledLeaveModal';
 import { StudentBehaviorModal } from './StudentBehaviorModal';
 
@@ -112,6 +113,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
 
   // Form Fields (includes photo base64 string)
+  const [isCompressingPhoto, setIsCompressingPhoto] = useState(false);
   const [formData, setFormData] = useState({
     nis: '',
     name: '',
@@ -308,33 +310,31 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
   };
 
   /**
-   * File Upload Handler utilizing FileReader utility
-   * Converts uploaded photo into base64 string and stores it in photo property
+   * File Upload Handler with Automatic Compression
+   * Compresses uploaded photo to ~15-25 KB (240x320 px) for lightning-fast performance & minimal storage
    */
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        alert('Ukuran file foto maksimal 5 MB!');
+      if (file.size > 10 * 1024 * 1024) {
+        alert('Ukuran file foto maksimal 10 MB!');
         return;
       }
 
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64Result = event.target?.result;
-        if (typeof base64Result === 'string') {
-          setFormData((prev) => ({
-            ...prev,
-            photo: base64Result,
-            avatarUrl: base64Result, // keep sync
-          }));
-        }
-      };
-      reader.onerror = (error) => {
-        console.error('Error reading photo file:', error);
-        alert('Gagal membaca file gambar. Silakan coba file lain.');
-      };
-      reader.readAsDataURL(file);
+      setIsCompressingPhoto(true);
+      try {
+        const compressedBase64 = await compressStudentPhoto(file);
+        setFormData((prev) => ({
+          ...prev,
+          photo: compressedBase64,
+          avatarUrl: compressedBase64,
+        }));
+      } catch (err: any) {
+        console.error('Error compressing student photo:', err);
+        alert('Gagal memproses dan mengompres foto. Silakan coba file gambar lain.');
+      } finally {
+        setIsCompressingPhoto(false);
+      }
     }
   };
 
@@ -1209,25 +1209,42 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
 
                 {/* Live Preview */}
                 <div className="flex items-center gap-4">
-                  <img
-                    src={formData.photo || formData.avatarUrl || getDefaultAvatar(formData.gender)}
-                    alt="Preview"
-                    className="w-14 h-14 rounded-full object-cover ring-2 ring-indigo-500/30 bg-slate-200 shadow-xs"
-                  />
+                  <div className="relative">
+                    <img
+                      src={formData.photo || formData.avatarUrl || getDefaultAvatar(formData.gender)}
+                      alt="Preview"
+                      className="w-14 h-14 rounded-full object-cover ring-2 ring-indigo-500/30 bg-slate-200 shadow-xs"
+                    />
+                    {isCompressingPhoto && (
+                      <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center">
+                        <i className="fa-solid fa-spinner fa-spin text-white text-sm"></i>
+                      </div>
+                    )}
+                  </div>
                   <div className="space-y-1.5 flex-1">
-                    {/* Real File Upload via FileReader */}
-                    <label className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer transition-all">
-                      <i className="fa-solid fa-cloud-arrow-up text-xs"></i>
-                      <span>Unggah Foto Asli (Base64)</span>
+                    {/* Real File Upload with Auto-Compression */}
+                    <label className={`inline-flex items-center gap-2 px-3 py-1.5 ${isCompressingPhoto ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'} text-white text-xs font-bold rounded-xl shadow-xs transition-all`}>
+                      {isCompressingPhoto ? (
+                        <>
+                          <i className="fa-solid fa-spinner fa-spin text-xs"></i>
+                          <span>Mengompres Foto...</span>
+                        </>
+                      ) : (
+                        <>
+                          <i className="fa-solid fa-cloud-arrow-up text-xs"></i>
+                          <span>Unggah Foto Pasfoto (Auto-Kompres)</span>
+                        </>
+                      )}
                       <input
                         type="file"
                         accept="image/*"
+                        disabled={isCompressingPhoto}
                         onChange={handleFileUpload}
                         className="hidden"
                       />
                     </label>
                     <p className="text-[10px] text-slate-500">
-                      Disimpan sebagai Base64 di LocalStorage (JPG, PNG, WEBP Maks. 5MB)
+                      Otomatis dikompres ke ~15-20 KB agar sangat ringan & hemat penyimpanan (JPG/PNG/WEBP)
                     </p>
                   </div>
                 </div>
