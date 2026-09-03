@@ -7,7 +7,7 @@ import { SD_CLASSES } from '../data/initialData';
 import { exportStudentsToCSV, downloadStudentImportTemplateCSV, parseStudentImportCSV } from '../utils/csv';
 import { downloadStudentImportTemplateExcel, parseStudentExcelFile } from '../utils/excel';
 import { formatPhoneNumberForWA } from '../utils/whatsapp';
-import { isHomeroomClassMatch, formatClassLabel } from '../utils/classUtils';
+import { isHomeroomClassMatch, formatClassLabel, findHomeroomTeacher } from '../utils/classUtils';
 import { compressStudentPhoto } from '../utils/imageCompressor';
 import { ScheduledLeaveModal } from './ScheduledLeaveModal';
 import { StudentBehaviorModal } from './StudentBehaviorModal';
@@ -16,6 +16,7 @@ interface StudentsTabProps {
   students: Student[];
   settings: SystemSettings;
   currentTeacher: Teacher | null;
+  teachers?: Teacher[];
   scheduledLeaves?: ScheduledLeave[];
   behaviorLogs?: BehaviorLog[];
   onAddStudent: (student: Omit<Student, 'id' | 'createdAt'>) => void;
@@ -33,6 +34,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
   students,
   settings,
   currentTeacher,
+  teachers,
   scheduledLeaves = [],
   behaviorLogs = [],
   onAddStudent,
@@ -572,7 +574,17 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
 
           {/* Export CSV Button (Available to all) */}
           <button
-            onClick={() => exportStudentsToCSV(filteredStudents)}
+            onClick={() =>
+              exportStudentsToCSV(filteredStudents, undefined, {
+                settings,
+                selectedClass,
+                homeroomTeacher: findHomeroomTeacher(teachers, selectedClass, currentTeacher),
+                headmaster: {
+                  name: settings.headmasterName,
+                  nip: settings.headmasterNip,
+                },
+              })
+            }
             className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold rounded-xl transition-all shadow-2xs cursor-pointer"
             title="Unduh Data Siswa Saat Ini ke File (.csv)"
           >

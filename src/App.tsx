@@ -835,6 +835,7 @@ export default function App() {
                 students={students}
                 settings={settings}
                 currentTeacher={currentTeacher}
+                teachers={teachers}
                 scheduledLeaves={scheduledLeaves}
                 behaviorLogs={behaviorLogs}
                 onAddStudent={handleAddStudent}

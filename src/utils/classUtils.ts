@@ -1,3 +1,5 @@
+import { Teacher } from '../types';
+
 /**
  * Utility functions for matching, filtering, and displaying SD school classes.
  * Handles both plain grade formats ('1', 'Kelas 1', '1-A', 'Kelas 1-A') seamlessly.
@@ -58,4 +60,90 @@ export function formatClassLabel(className?: string): string {
   if (!className) return 'Kelas -';
   if (className.toLowerCase().startsWith('kelas')) return className;
   return `Kelas ${className}`;
+}
+
+/**
+ * Normalizes NIP string preventing duplicate "NIP. NIP." prefixes
+ */
+export function formatCleanNIP(rawNip?: string): string {
+  if (!rawNip) return 'NIP. ............................';
+  const trimmed = rawNip.trim();
+  if (!trimmed || trimmed === '-' || trimmed.includes('.....')) {
+    return 'NIP. ............................';
+  }
+  const cleaned = trimmed.replace(/^(?:NIP[\s.:-]+)+/i, '').trim();
+  if (!cleaned || cleaned === '-' || cleaned.includes('.....')) {
+    return 'NIP. ............................';
+  }
+  return `NIP. ${cleaned}`;
+}
+
+/**
+ * Finds the corresponding homeroom teacher for a class from the teachers list or active session
+ */
+export function findHomeroomTeacher(
+  teachers: Teacher[] | undefined,
+  targetClass: string,
+  currentTeacher?: Teacher | null
+): { name: string; nip: string; classLabel: string; isFound: boolean } {
+  const isAll = !targetClass || targetClass === 'Semua';
+
+  if (isAll) {
+    if (currentTeacher?.homeroomClass) {
+      return {
+        name: currentTeacher.name,
+        nip: formatCleanNIP(currentTeacher.nip),
+        classLabel: `Wali Kelas ${formatClassLabel(currentTeacher.homeroomClass)}`,
+        isFound: true,
+      };
+    }
+    const adminOrCoord = teachers?.find((t) => t.role === 'admin' || t.teacherType === 'admin');
+    if (adminOrCoord) {
+      return {
+        name: adminOrCoord.name,
+        nip: formatCleanNIP(adminOrCoord.nip),
+        classLabel: 'Koordinator Presensi / Kesiswaan',
+        isFound: true,
+      };
+    }
+    return {
+      name: '( ........................................ )',
+      nip: 'NIP. ............................',
+      classLabel: 'Wali Kelas / Koordinator Presensi',
+      isFound: false,
+    };
+  }
+
+  // Look for teacher assigned to this homeroom class
+  const matchedTeacher = teachers?.find((t) => {
+    if (!t.homeroomClass) return false;
+    return isHomeroomClassMatch(targetClass, t.homeroomClass);
+  });
+
+  if (matchedTeacher) {
+    return {
+      name: matchedTeacher.name,
+      nip: formatCleanNIP(matchedTeacher.nip),
+      classLabel: `Wali Kelas ${formatClassLabel(targetClass)}`,
+      isFound: true,
+    };
+  }
+
+  // Check current teacher
+  if (currentTeacher?.homeroomClass && isHomeroomClassMatch(targetClass, currentTeacher.homeroomClass)) {
+    return {
+      name: currentTeacher.name,
+      nip: formatCleanNIP(currentTeacher.nip),
+      classLabel: `Wali Kelas ${formatClassLabel(targetClass)}`,
+      isFound: true,
+    };
+  }
+
+  // Fallback placeholder
+  return {
+    name: '( ........................................ )',
+    nip: 'NIP. ............................',
+    classLabel: `Wali Kelas ${formatClassLabel(targetClass)}`,
+    isFound: false,
+  };
 }

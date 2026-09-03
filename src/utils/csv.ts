@@ -1,15 +1,68 @@
 import { AttendanceRecord, Student, SystemSettings, Teacher } from '../types';
+import { formatCleanNIP } from './classUtils';
+
+export interface CSVAttendanceExportOptions {
+  records: AttendanceRecord[];
+  filename?: string;
+  settings?: SystemSettings;
+  selectedClass?: string;
+  dateRangeLabel?: string;
+  homeroomTeacher?: {
+    name?: string;
+    nip?: string;
+    classLabel?: string;
+  };
+  headmaster?: {
+    name?: string;
+    nip?: string;
+  };
+  signatureDate?: string;
+}
 
 /**
  * Export attendance records to Excel-compatible CSV file with UTF-8 BOM
  */
 export const exportAttendanceToCSV = (
-  records: AttendanceRecord[],
-  filename = 'Rekap_Absensi_Siswa_SD.csv'
+  recordsOrOptions: AttendanceRecord[] | CSVAttendanceExportOptions,
+  legacyFilename?: string
 ) => {
+  let records: AttendanceRecord[] = [];
+  let filename = legacyFilename || 'Rekap_Absensi_Siswa_SD.csv';
+  let settings: SystemSettings | undefined = undefined;
+  let selectedClass = 'Semua';
+  let dateRangeLabel = '';
+  let homeroomTeacher: { name?: string; nip?: string; classLabel?: string } | undefined = undefined;
+  let headmaster: { name?: string; nip?: string } | undefined = undefined;
+  let signatureDate = '';
+
+  if (Array.isArray(recordsOrOptions)) {
+    records = recordsOrOptions;
+  } else {
+    records = recordsOrOptions.records;
+    filename = recordsOrOptions.filename || filename;
+    settings = recordsOrOptions.settings;
+    selectedClass = recordsOrOptions.selectedClass || 'Semua';
+    dateRangeLabel = recordsOrOptions.dateRangeLabel || '';
+    homeroomTeacher = recordsOrOptions.homeroomTeacher;
+    headmaster = recordsOrOptions.headmaster;
+    signatureDate = recordsOrOptions.signatureDate || '';
+  }
+
   if (!records || records.length === 0) {
     alert('Tidak ada data absensi untuk diekspor.');
     return;
+  }
+
+  const lines: string[] = [];
+
+  // Kop Header if settings provided
+  if (settings) {
+    lines.push(`"${settings.schoolName.toUpperCase()}"`);
+    lines.push(`"LAPORAN REKAPITULASI PRESENSI SISWA - TAHUN AJARAN ${settings.academicYear}"`);
+    if (dateRangeLabel) lines.push(`"Periode:","${dateRangeLabel}"`);
+    lines.push(`"Kelas:","${selectedClass}"`);
+    lines.push(`"Batas Masuk:","${settings.lateCutoffTime} WIB"`);
+    lines.push('""');
   }
 
   // Header row
@@ -24,24 +77,214 @@ export const exportAttendanceToCSV = (
     'Metode Absen',
     'Keterangan',
   ];
+  lines.push(headers.join(','));
 
   // Data rows
-  const rows = records.map((record, index) => [
-    index + 1,
-    `"${record.date}"`,
-    `"${record.time}"`,
-    `"${record.nis}"`,
-    `"${record.studentName.replace(/"/g, '""')}"`,
-    `"${record.classRoom}"`,
-    `"${record.status}"`,
-    `"${record.scannedVia}"`,
-    `"${(record.note || '').replace(/"/g, '""')}"`,
-  ]);
+  records.forEach((record, index) => {
+    const row = [
+      index + 1,
+      `"${record.date}"`,
+      `"${record.time}"`,
+      `"${record.nis}"`,
+      `"${record.studentName.replace(/"/g, '""')}"`,
+      `"${record.classRoom}"`,
+      `"${record.status}"`,
+      `"${record.scannedVia}"`,
+      `"${(record.note || '').replace(/"/g, '""')}"`,
+    ];
+    lines.push(row.join(','));
+  });
+
+  // Tanda Tangan Section
+  if (settings) {
+    const now = new Date();
+    const dateFormatted = signatureDate || now.toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+    const city = settings.schoolCity || 'Kota';
+    const waliTitle = homeroomTeacher?.classLabel || (selectedClass !== 'Semua' ? `Wali Kelas ${selectedClass}` : 'Wali Kelas / Koordinator');
+    const waliName = homeroomTeacher?.name?.trim() || '( ........................................ )';
+    const waliNip = formatCleanNIP(homeroomTeacher?.nip);
+
+    const headName = headmaster?.name?.trim() || settings.headmasterName?.trim() || '( ........................................ )';
+    const headNip = formatCleanNIP(headmaster?.nip || settings.headmasterNip);
+
+    lines.push('""');
+    lines.push('""');
+    lines.push(`"","Mengetahui,","","","","","${city}, ${dateFormatted}"`);
+    lines.push(`"","${waliTitle}","","","","","Mengetahui,"`);
+    lines.push(`"","","","","","","Kepala Sekolah"`);
+    lines.push('""');
+    lines.push('""');
+    lines.push(`"","${waliName}","","","","","${headName}"`);
+    lines.push(`"","${waliNip}","","","","","${headNip}"`);
+  }
 
   // Combine CSV content with BOM for Excel UTF-8 compatibility
-  const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-
+  const csvContent = '\uFEFF' + lines.join('\n');
   downloadFile(csvContent, filename, 'text/csv;charset=utf-8;');
+};
+
+export interface MonthlyRecapCSVExportOptions {
+  recaps: Array<{
+    nis: string;
+    name: string;
+    classRoom: string;
+    gender: string;
+    hadir: number;
+    terlambat: number;
+    sakit: number;
+    izin: number;
+    alpa: number;
+    totalHadir: number;
+    percentage: number;
+  }>;
+  monthLabel: string;
+  selectedClass: string;
+  settings: SystemSettings;
+  homeroomTeacher?: {
+    name?: string;
+    nip?: string;
+    classLabel?: string;
+  };
+  headmaster?: {
+    name?: string;
+    nip?: string;
+  };
+  signatureDate?: string;
+  filename?: string;
+}
+
+/**
+ * Export Monthly Student Attendance Summary (Per Siswa: Hadir, Terlambat, Sakit, Izin, Alfa) to CSV
+ */
+export const exportMonthlyRecapToCSV = ({
+  recaps,
+  monthLabel,
+  selectedClass,
+  settings,
+  homeroomTeacher,
+  headmaster,
+  signatureDate,
+  filename,
+}: MonthlyRecapCSVExportOptions) => {
+  if (!recaps || recaps.length === 0) {
+    alert('Tidak ada data siswa untuk diekspor ke rekap bulanan.');
+    return;
+  }
+
+  const lines: string[] = [];
+
+  // Kop Header
+  lines.push(`"${settings.schoolName.toUpperCase()}"`);
+  lines.push(`"LAPORAN REKAPITULASI PRESENSI BULANAN SISWA"`);
+  lines.push(`"Tahun Ajaran:","${settings.academicYear}"`);
+  lines.push(`"Bulan:","${monthLabel}"`);
+  lines.push(`"Kelas:","${selectedClass}"`);
+  lines.push(`"Total Siswa:","${recaps.length} Siswa"`);
+  lines.push('""');
+
+  // Columns
+  const headers = [
+    'No',
+    'NIS',
+    'Nama Siswa',
+    'Kelas',
+    'L/P',
+    'Hadir (Hari)',
+    'Terlambat (Hari)',
+    'Sakit (Hari)',
+    'Izin (Hari)',
+    'Alfa (Hari)',
+    'Total Hadir (Hari)',
+    'Persentase Kehadiran (%)',
+  ];
+  lines.push(headers.join(','));
+
+  let totalHadir = 0;
+  let totalTerlambat = 0;
+  let totalSakit = 0;
+  let totalIzin = 0;
+  let totalAlpa = 0;
+  let totalKehadiranSemua = 0;
+
+  recaps.forEach((r, idx) => {
+    totalHadir += r.hadir;
+    totalTerlambat += r.terlambat;
+    totalSakit += r.sakit;
+    totalIzin += r.izin;
+    totalAlpa += r.alpa;
+    totalKehadiranSemua += r.totalHadir;
+
+    const row = [
+      idx + 1,
+      `"${r.nis}"`,
+      `"${r.name.replace(/"/g, '""')}"`,
+      `"${r.classRoom}"`,
+      `"${r.gender === 'Perempuan' ? 'P' : 'L'}"`,
+      r.hadir,
+      r.terlambat,
+      r.sakit,
+      r.izin,
+      r.alpa,
+      r.totalHadir,
+      `"${r.percentage}%"`,
+    ];
+    lines.push(row.join(','));
+  });
+
+  // Summary Row
+  lines.push(
+    [
+      '"TOTAL"',
+      '""',
+      '""',
+      '""',
+      '""',
+      totalHadir,
+      totalTerlambat,
+      totalSakit,
+      totalIzin,
+      totalAlpa,
+      totalKehadiranSemua,
+      '""',
+    ].join(',')
+  );
+
+  // Signatures
+  const now = new Date();
+  const dateFormatted = signatureDate || now.toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+  const city = settings.schoolCity || 'Kota';
+  const waliTitle = homeroomTeacher?.classLabel || (selectedClass !== 'Semua' ? `Wali Kelas ${selectedClass}` : 'Wali Kelas / Koordinator');
+  const waliName = homeroomTeacher?.name?.trim() || '( ........................................ )';
+  const waliNip = formatCleanNIP(homeroomTeacher?.nip);
+
+  const headName = headmaster?.name?.trim() || settings.headmasterName?.trim() || '( ........................................ )';
+  const headNip = formatCleanNIP(headmaster?.nip || settings.headmasterNip);
+
+  lines.push('""');
+  lines.push('""');
+  lines.push(`"","Mengetahui,","","","","","${city}, ${dateFormatted}"`);
+  lines.push(`"","${waliTitle}","","","","","Mengetahui,"`);
+  lines.push(`"","","","","","","Kepala Sekolah"`);
+  lines.push('""');
+  lines.push('""');
+  lines.push(`"","${waliName}","","","","","${headName}"`);
+  lines.push(`"","${waliNip}","","","","","${headNip}"`);
+
+  const safeSchool = settings.schoolName.replace(/[\s\/\\]+/g, '_');
+  const safeMonth = monthLabel.replace(/[\s\/\\]+/g, '_');
+  const safeClass = selectedClass.replace(/[\s\/\\]+/g, '_');
+  const defaultFilename = `Rekap_Bulanan_${safeSchool}_${safeMonth}_Kelas_${safeClass}.csv`;
+
+  const csvContent = '\uFEFF' + lines.join('\n');
+  downloadFile(csvContent, filename || defaultFilename, 'text/csv;charset=utf-8;');
 };
 
 /**
@@ -49,27 +292,73 @@ export const exportAttendanceToCSV = (
  */
 export const exportStudentsToCSV = (
   students: Student[],
-  filename = 'Data_Siswa_SD.csv'
+  filename = 'Data_Siswa_SD.csv',
+  options?: {
+    settings?: SystemSettings;
+    selectedClass?: string;
+    homeroomTeacher?: { name?: string; nip?: string; classLabel?: string };
+    headmaster?: { name?: string; nip?: string };
+  }
 ) => {
   if (!students || students.length === 0) {
     alert('Tidak ada data siswa untuk diekspor.');
     return;
   }
 
+  const lines: string[] = [];
+
+  if (options?.settings) {
+    const s = options.settings;
+    lines.push(`"${s.schoolName.toUpperCase()}"`);
+    lines.push(`"BUKU INDUK / DATA SISWA - TAHUN AJARAN ${s.academicYear}"`);
+    if (options.selectedClass) lines.push(`"Kelas:","${options.selectedClass}"`);
+    lines.push(`"Total Siswa:","${students.length} Siswa"`);
+    lines.push('""');
+  }
+
   const headers = ['No', 'NIS', 'Nama Lengkap', 'Kelas', 'Jenis Kelamin', 'No HP Orang Tua', 'Tanggal Daftar'];
+  lines.push(headers.join(','));
 
-  const rows = students.map((std, index) => [
-    index + 1,
-    `"${std.nis}"`,
-    `"${std.name.replace(/"/g, '""')}"`,
-    `"${std.classRoom}"`,
-    `"${std.gender}"`,
-    `"${std.parentPhone}"`,
-    `"${std.createdAt || '-'}"`,
-  ]);
+  students.forEach((std, index) => {
+    const row = [
+      index + 1,
+      `"${std.nis}"`,
+      `"${std.name.replace(/"/g, '""')}"`,
+      `"${std.classRoom}"`,
+      `"${std.gender}"`,
+      `"${std.parentPhone}"`,
+      `"${std.createdAt || '-'}"`,
+    ];
+    lines.push(row.join(','));
+  });
 
-  const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+  if (options?.settings) {
+    const s = options.settings;
+    const now = new Date();
+    const dateFormatted = now.toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+    const city = s.schoolCity || 'Kota';
+    const waliTitle = options.homeroomTeacher?.classLabel || (options.selectedClass && options.selectedClass !== 'Semua' ? `Wali Kelas ${options.selectedClass}` : 'Wali Kelas / Koordinator');
+    const waliName = options.homeroomTeacher?.name?.trim() || '( ........................................ )';
+    const waliNip = formatCleanNIP(options.homeroomTeacher?.nip);
+    const headName = options.headmaster?.name?.trim() || s.headmasterName?.trim() || '( ........................................ )';
+    const headNip = formatCleanNIP(options.headmaster?.nip || s.headmasterNip);
 
+    lines.push('""');
+    lines.push('""');
+    lines.push(`"","Mengetahui,","","","${city}, ${dateFormatted}"`);
+    lines.push(`"","${waliTitle}","","","Mengetahui,"`);
+    lines.push(`"","","","","Kepala Sekolah"`);
+    lines.push('""');
+    lines.push('""');
+    lines.push(`"","${waliName}","","","${headName}"`);
+    lines.push(`"","${waliNip}","","","${headNip}"`);
+  }
+
+  const csvContent = '\uFEFF' + lines.join('\n');
   downloadFile(csvContent, filename, 'text/csv;charset=utf-8;');
 };
 

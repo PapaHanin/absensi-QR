@@ -1,10 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { Student, AttendanceRecord, AttendanceStatus, SystemSettings, Teacher, ScheduledLeave, BehaviorLog } from '../types';
-import { exportAttendanceToCSV } from '../utils/csv';
+import { exportAttendanceToCSV, exportMonthlyRecapToCSV } from '../utils/csv';
 import { openWhatsAppNotification } from '../utils/whatsapp';
-import { generateAttendancePDFReport } from '../utils/pdf';
+import { generateAttendancePDFReport, generateMonthlyAttendancePDFReport } from '../utils/pdf';
 import { AttendanceTrendChart } from './AttendanceTrendChart';
-import { isHomeroomClassMatch, formatClassLabel } from '../utils/classUtils';
+import { isHomeroomClassMatch, formatClassLabel, findHomeroomTeacher } from '../utils/classUtils';
 import { AutoAbsenteeModal } from './AutoAbsenteeModal';
 import { ScheduledLeaveModal } from './ScheduledLeaveModal';
 import { StudentBehaviorModal } from './StudentBehaviorModal';
@@ -78,6 +78,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const [startDate, setStartDate] = useState<string>(selectedDate);
   const [endDate, setEndDate] = useState<string>(selectedDate);
   const [monthPicker, setMonthPicker] = useState<string>(() => selectedDate.slice(0, 7));
+  const [monthlyViewMode, setMonthlyViewMode] = useState<'summary' | 'logs'>('summary');
 
   // Filter attendance by date / range / month
   const dateFilteredRecords = useMemo(() => {
@@ -175,69 +176,144 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     });
   }, [dateFilteredRecords, searchTerm, isWaliKelas, myHomeroom, selectedClass, selectedStatus]);
 
+  // Per-Student Monthly Summary Breakdown: Hadir, Terlambat, Sakit, Izin, Alfa
+  const monthlyStudentRecaps = useMemo(() => {
+    if (filterMode !== 'monthly') return [];
+
+    const classStudents = students.filter((s) => {
+      let matchClass = true;
+      if (isWaliKelas && myHomeroom) {
+        matchClass = isHomeroomClassMatch(s.classRoom, myHomeroom);
+      } else if (selectedClass !== 'Semua') {
+        matchClass = isHomeroomClassMatch(s.classRoom, selectedClass) || s.classRoom === selectedClass;
+      }
+      const matchSearch =
+        !searchTerm ||
+        s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        s.nis.toLowerCase().includes(searchTerm.toLowerCase());
+      return matchClass && matchSearch;
+    });
+
+    return classStudents.map((s) => {
+      const recordsInMonth = attendanceRecords.filter(
+        (r) => r.date.startsWith(monthPicker) && (r.studentId === s.id || r.nis === s.nis)
+      );
+
+      let hadir = recordsInMonth.filter((r) => r.status === 'Hadir').length;
+      let terlambat = recordsInMonth.filter((r) => r.status === 'Terlambat').length;
+      let sakit = recordsInMonth.filter((r) => r.status === 'Sakit').length;
+      let izin = recordsInMonth.filter((r) => r.status === 'Izin').length;
+      let alpa = recordsInMonth.filter((r) => r.status === 'Alpa').length;
+
+      // Account for multi-day scheduled leaves
+      scheduledLeaves?.forEach((leave) => {
+        if (leave.studentId === s.id) {
+          const start = new Date(leave.startDate);
+          const end = new Date(leave.endDate);
+          const cur = new Date(start);
+          while (cur <= end) {
+            const curStr = cur.toISOString().split('T')[0];
+            if (curStr.startsWith(monthPicker)) {
+              const alreadyHasRecord = recordsInMonth.some((r) => r.date === curStr);
+              if (!alreadyHasRecord) {
+                if (leave.type === 'Sakit') sakit++;
+                else if (leave.type === 'Izin' || leave.type === 'Dispensasi') izin++;
+              }
+            }
+            cur.setDate(cur.getDate() + 1);
+          }
+        }
+      });
+
+      const totalHadir = hadir + terlambat;
+      const totalHari = hadir + terlambat + sakit + izin + alpa;
+      const percentage = totalHari > 0 ? Math.round((totalHadir / totalHari) * 100) : 0;
+
+      return {
+        studentId: s.id,
+        nis: s.nis,
+        name: s.name,
+        classRoom: s.classRoom,
+        gender: s.gender,
+        avatarUrl: s.avatarUrl || s.photo,
+        parentPhone: s.parentPhone,
+        hadir,
+        terlambat,
+        sakit,
+        izin,
+        alpa,
+        totalHadir,
+        totalHari,
+        percentage,
+      };
+    });
+  }, [filterMode, students, isWaliKelas, myHomeroom, selectedClass, searchTerm, monthPicker, attendanceRecords, scheduledLeaves]);
+
   const handleExportCSV = () => {
+    const hrTeacher = findHomeroomTeacher(teachers, selectedClass, currentTeacher);
+    const hm = {
+      name: settings.headmasterName,
+      nip: settings.headmasterNip,
+    };
+
+    if (filterMode === 'monthly') {
+      if (!monthlyStudentRecaps || monthlyStudentRecaps.length === 0) {
+        setExportAlertMessage('Tidak ada data siswa untuk diekspor ke rekap bulanan pada filter saat ini.');
+        return;
+      }
+      exportMonthlyRecapToCSV({
+        recaps: monthlyStudentRecaps,
+        monthLabel: dateRangeLabel,
+        selectedClass,
+        settings,
+        homeroomTeacher: hrTeacher,
+        headmaster: hm,
+      });
+      return;
+    }
+
     if (!filteredTableData || filteredTableData.length === 0) {
       setExportAlertMessage('Tidak ada data absensi untuk diekspor ke CSV pada filter saat ini.');
       return;
     }
-    exportAttendanceToCSV(
-      filteredTableData,
-      `Rekap_Absensi_${dateRangeLabel.replace(/[\s\/\\]+/g, '_')}_Kelas_${selectedClass}.csv`
-    );
+    exportAttendanceToCSV({
+      records: filteredTableData,
+      filename: `Rekap_Absensi_${dateRangeLabel.replace(/[\s\/\\]+/g, '_')}_Kelas_${selectedClass}.csv`,
+      settings,
+      selectedClass,
+      dateRangeLabel,
+      homeroomTeacher: hrTeacher,
+      headmaster: hm,
+    });
   };
 
   const handleExportPDF = () => {
+    const hrTeacher = findHomeroomTeacher(teachers, selectedClass, currentTeacher);
+    const hm = {
+      name: settings.headmasterName,
+      nip: settings.headmasterNip,
+    };
+
+    if (filterMode === 'monthly') {
+      if (!monthlyStudentRecaps || monthlyStudentRecaps.length === 0) {
+        setExportAlertMessage('Tidak ada data siswa untuk dicetak ke PDF rekap bulanan.');
+        return;
+      }
+      generateMonthlyAttendancePDFReport({
+        recaps: monthlyStudentRecaps,
+        monthLabel: dateRangeLabel,
+        selectedClass,
+        settings,
+        homeroomTeacher: hrTeacher,
+        headmaster: hm,
+      });
+      return;
+    }
+
     if (!filteredTableData || filteredTableData.length === 0) {
       setExportAlertMessage('Tidak ada data absensi untuk dicetak ke PDF pada filter saat ini.');
       return;
     }
-
-    // Dynamic signature determination based on selected class and teachers list
-    let hrTeacher: { name?: string; nip?: string; classLabel?: string } | undefined = undefined;
-
-    if (selectedClass !== 'Semua') {
-      const matchedTeacher = teachers?.find(
-        (t) => (t.teacherType === 'wali_kelas' || t.homeroomClass) && t.homeroomClass === selectedClass
-      );
-      if (matchedTeacher) {
-        hrTeacher = {
-          name: matchedTeacher.name,
-          nip: matchedTeacher.nip || '-',
-          classLabel: `Wali Kelas ${selectedClass}`,
-        };
-      } else if (currentTeacher?.homeroomClass === selectedClass) {
-        hrTeacher = {
-          name: currentTeacher.name,
-          nip: currentTeacher.nip || '-',
-          classLabel: `Wali Kelas ${selectedClass}`,
-        };
-      } else {
-        hrTeacher = {
-          name: '....................................',
-          nip: 'NIP. ............................',
-          classLabel: `Wali Kelas ${selectedClass}`,
-        };
-      }
-    } else {
-      if (currentTeacher?.teacherType === 'wali_kelas' && currentTeacher.homeroomClass) {
-        hrTeacher = {
-          name: currentTeacher.name,
-          nip: currentTeacher.nip || '-',
-          classLabel: `Wali Kelas ${currentTeacher.homeroomClass}`,
-        };
-      } else {
-        hrTeacher = {
-          name: '....................................',
-          nip: 'NIP. ............................',
-          classLabel: 'Wali Kelas / Koordinator Presensi',
-        };
-      }
-    }
-
-    const hm = {
-      name: settings.headmasterName || 'Drs. H. Mulyadi, M.Pd.',
-      nip: settings.headmasterNip || '19680512 199403 1 004',
-    };
 
     generateAttendancePDFReport({
       records: filteredTableData,
@@ -694,12 +770,61 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           </div>
         </div>
 
+        {/* Monthly View Mode Switcher */}
+        {filterMode === 'monthly' && (
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <i className="fa-solid fa-chart-pie text-indigo-600 dark:text-indigo-400"></i>
+                <span>Tampilan Rekap {dateRangeLabel}:</span>
+              </span>
+            </div>
+            <div className="flex items-center gap-1 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
+              <button
+                type="button"
+                onClick={() => setMonthlyViewMode('summary')}
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 font-bold cursor-pointer ${
+                  monthlyViewMode === 'summary'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <i className="fa-solid fa-table-list text-xs"></i>
+                <span>Rekap Per Siswa (H / T / S / I / A)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMonthlyViewMode('logs')}
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 font-bold cursor-pointer ${
+                  monthlyViewMode === 'logs'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <i className="fa-solid fa-clock-rotate-left text-xs"></i>
+                <span>Log Scan Harian ({filteredTableData.length})</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Table Results Count & Reset */}
         <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-800 pt-3">
           <span>
-            Menampilkan <strong className="text-slate-900 dark:text-white font-mono font-bold">{filteredTableData.length}</strong> data absensi
-            {selectedClass !== 'Semua' && (
-              <> (Kelas <span className="font-bold text-indigo-600 dark:text-indigo-400">{selectedClass}</span>)</>
+            {filterMode === 'monthly' && monthlyViewMode === 'summary' ? (
+              <>
+                Menampilkan rekapitulasi kehadiran untuk <strong className="text-slate-900 dark:text-white font-mono font-bold">{monthlyStudentRecaps.length}</strong> siswa
+                {selectedClass !== 'Semua' && (
+                  <> (Kelas <span className="font-bold text-indigo-600 dark:text-indigo-400">{selectedClass}</span>)</>
+                )}
+              </>
+            ) : (
+              <>
+                Menampilkan <strong className="text-slate-900 dark:text-white font-mono font-bold">{filteredTableData.length}</strong> data absensi
+                {selectedClass !== 'Semua' && (
+                  <> (Kelas <span className="font-bold text-indigo-600 dark:text-indigo-400">{selectedClass}</span>)</>
+                )}
+              </>
             )}
           </span>
           {(searchTerm || selectedClass !== 'Semua' || selectedStatus !== 'Semua') && (
@@ -717,117 +842,286 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           )}
         </div>
 
-        {/* Main Attendance Table */}
+        {/* Attendance Table */}
         <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 uppercase tracking-wider text-[10px] font-bold border-b border-slate-200 dark:border-slate-700">
-              <tr>
-                <th className="py-3 px-4">No</th>
-                <th className="py-3 px-4">Siswa</th>
-                <th className="py-3 px-4">Kelas</th>
-                {filterMode !== 'daily' && <th className="py-3 px-4">Tanggal</th>}
-                <th className="py-3 px-4">Jam Masuk</th>
-                <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4">Metode</th>
-                <th className="py-3 px-4">Keterangan</th>
-                <th className="py-3 px-4 text-right">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-900">
-              {filteredTableData.length > 0 ? (
-                filteredTableData.map((record, index) => {
-                  const studentInfo = students.find((s) => s.id === record.studentId);
-                  return (
-                    <tr key={record.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors">
-                      <td className="py-3 px-4 font-mono text-slate-400 dark:text-slate-500 font-medium">{index + 1}</td>
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-3">
-                          <img
-                            src={studentInfo?.photo || studentInfo?.avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'}
-                            alt={record.studentName}
-                            className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700"
-                          />
-                          <div>
-                            <div className="font-extrabold text-slate-900 dark:text-white">{record.studentName}</div>
-                            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">NIS: {record.nis}</div>
+          {filterMode === 'monthly' && monthlyViewMode === 'summary' ? (
+            /* Monthly Per-Student Summary Table */
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 uppercase tracking-wider text-[10px] font-bold border-b border-slate-200 dark:border-slate-700">
+                <tr>
+                  <th className="py-3 px-3 text-center">No</th>
+                  <th className="py-3 px-4">Nama Siswa</th>
+                  <th className="py-3 px-3 text-center">Kelas</th>
+                  <th className="py-3 px-3 text-center">Hadir (H)</th>
+                  <th className="py-3 px-3 text-center">Terlambat (T)</th>
+                  <th className="py-3 px-3 text-center">Sakit (S)</th>
+                  <th className="py-3 px-3 text-center">Izin (I)</th>
+                  <th className="py-3 px-3 text-center">Alfa (A)</th>
+                  <th className="py-3 px-3 text-center">Total Masuk</th>
+                  <th className="py-3 px-4">Persentase</th>
+                  <th className="py-3 px-4 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-900">
+                {monthlyStudentRecaps.length > 0 ? (
+                  monthlyStudentRecaps.map((r, index) => {
+                    const studentInfo = students.find((s) => s.id === r.studentId);
+                    return (
+                      <tr key={r.studentId} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors">
+                        <td className="py-3 px-3 text-center font-mono text-slate-400 dark:text-slate-500 font-medium">
+                          {index + 1}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <img
+                              src={r.avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'}
+                              alt={r.name}
+                              className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700"
+                            />
+                            <div>
+                              <div className="font-extrabold text-slate-900 dark:text-white">{r.name}</div>
+                              <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                                NIS: {r.nis} • {r.gender === 'Perempuan' ? 'P' : 'L'}
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 font-bold text-slate-700 dark:text-slate-300">{record.classRoom}</td>
-                      {filterMode !== 'daily' && (
-                        <td className="py-3 px-4 font-mono font-semibold text-slate-600 dark:text-slate-400">{record.date}</td>
-                      )}
-                      <td className="py-3 px-4 font-mono font-bold text-indigo-700 dark:text-indigo-400">{record.time} WIB</td>
-                      <td className="py-3 px-4">{getStatusBadge(record.status)}</td>
-                      <td className="py-3 px-4">
-                        <span className="text-[11px] text-slate-600 dark:text-slate-400 flex items-center gap-1.5 font-medium">
-                          <i
-                            className={
-                              record.scannedVia === 'QR Camera'
-                                ? 'fa-solid fa-camera text-indigo-600 dark:text-indigo-400'
-                                : 'fa-solid fa-keyboard text-amber-600 dark:text-amber-400'
-                            }
-                          ></i>
-                          {record.scannedVia}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-slate-600 dark:text-slate-400 max-w-xs truncate">
-                        {record.note || '-'}
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {studentInfo ? (
+                        </td>
+                        <td className="py-3 px-3 text-center font-bold text-slate-700 dark:text-slate-300">
+                          {r.classRoom}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span className="px-2 py-0.5 rounded-lg text-xs font-extrabold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                            {r.hadir} hr
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span className="px-2 py-0.5 rounded-lg text-xs font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                            {r.terlambat} hr
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span className="px-2 py-0.5 rounded-lg text-xs font-bold bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                            {r.sakit} hr
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span className="px-2 py-0.5 rounded-lg text-xs font-bold bg-sky-100 dark:bg-sky-950/80 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                            {r.izin} hr
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span
+                            className={`px-2 py-0.5 rounded-lg text-xs font-extrabold border ${
+                              r.alpa > 0
+                                ? 'bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
+                            }`}
+                          >
+                            {r.alpa} hr
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-center font-extrabold font-mono text-slate-900 dark:text-white">
+                          {r.totalHadir} hr
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2">
+                            <div className="w-16 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                              <div
+                                className={`h-full ${
+                                  r.percentage >= 85
+                                    ? 'bg-emerald-500'
+                                    : r.percentage >= 70
+                                    ? 'bg-amber-500'
+                                    : 'bg-rose-500'
+                                }`}
+                                style={{ width: `${r.percentage}%` }}
+                              ></div>
+                            </div>
+                            <span className="font-bold font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                              {r.percentage}%
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          {r.parentPhone ? (
                             <button
-                              onClick={() =>
-                                openWhatsAppNotification(
-                                  studentInfo,
-                                  record,
-                                  settings.schoolName
-                                )
-                              }
-                              title={`Kirim WA Otomatis ke Ortu ${record.studentName} (${studentInfo.parentPhone || 'No HP Belum Ada'})`}
-                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors cursor-pointer text-xs flex items-center gap-1.5 font-bold shadow-2xs"
+                              type="button"
+                              onClick={() => {
+                                const cleanPhone = r.parentPhone!.replace(/[^0-9]/g, '');
+                                const targetPhone = cleanPhone.startsWith('0') ? '62' + cleanPhone.slice(1) : cleanPhone;
+                                const message = `*LAPORAN REKAPITULASI PRESENSI BULANAN*\n${settings.schoolName}\n\nKepada Yth. Orang Tua / Wali dari:\n*Nama:* ${r.name}\n*NIS:* ${r.nis}\n*Kelas:* ${r.classRoom}\n*Periode:* ${dateRangeLabel}\n\n*Rincian Kehadiran:*\n✅ Hadir: ${r.hadir} hari\n⏰ Terlambat: ${r.terlambat} hari\n🏥 Sakit: ${r.sakit} hari\n📝 Izin: ${r.izin} hari\n❌ Alfa: ${r.alpa} hari\n*Total Hadir:* ${r.totalHadir} hari\n*Persentase Kehadiran:* ${r.percentage}%\n\nTerima kasih atas perhatian dan kerja sama Bapak/Ibu.`;
+                                window.open(`https://wa.me/${targetPhone}?text=${encodeURIComponent(message)}`, '_blank');
+                              }}
+                              title={`Kirim Rekap Bulanan via WA ke Ortu ${r.name} (${r.parentPhone})`}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors cursor-pointer text-xs inline-flex items-center gap-1.5 font-bold shadow-2xs"
                             >
                               <i className="fa-brands fa-whatsapp text-sm"></i>
-                              <span>Kirim WA</span>
+                              <span>Kirim Rekap WA</span>
                             </button>
                           ) : (
-                            <button
-                              disabled
-                              title="Data siswa tidak ditemukan"
-                              className="px-2 py-1 bg-slate-100 text-slate-400 rounded-lg text-xs font-medium cursor-not-allowed"
-                            >
-                              <i className="fa-brands fa-whatsapp text-sm mr-1"></i>
-                              <span>Kirim WA</span>
-                            </button>
+                            <span className="text-[10px] text-slate-400 italic">No HP -</span>
                           )}
-                          <button
-                            onClick={() => onDeleteRecord(record.id)}
-                            title="Hapus riwayat ini"
-                            className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
-                          >
-                            <i className="fa-solid fa-trash-can"></i>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-500">
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <i className="fa-solid fa-clipboard-question text-3xl text-slate-300"></i>
-                      <p className="font-bold text-sm text-slate-700">Tidak ada data absensi ditemukan</p>
-                      <p className="text-xs text-slate-500">
-                        Gunakan tab Scanner QR untuk melakukan pemindaian atau ubah filter tanggal/pencarian.
-                      </p>
-                    </div>
-                  </td>
-                </tr>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={11} className="py-12 text-center text-slate-500">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <i className="fa-solid fa-clipboard-question text-3xl text-slate-300"></i>
+                        <p className="font-bold text-sm text-slate-700">Tidak ada data siswa ditemukan</p>
+                        <p className="text-xs text-slate-500">
+                          Pastikan filter kelas dan pencarian siswa sesuai.
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              {monthlyStudentRecaps.length > 0 && (
+                <tfoot className="bg-slate-100 dark:bg-slate-800/90 font-bold text-slate-900 dark:text-white border-t-2 border-slate-300 dark:border-slate-700">
+                  <tr>
+                    <td colSpan={3} className="py-3 px-4 uppercase text-xs tracking-wider">
+                      TOTAL AKUMULASI KELAS ({monthlyStudentRecaps.length} SISWA)
+                    </td>
+                    <td className="py-3 px-3 text-center text-emerald-700 dark:text-emerald-400 font-extrabold font-mono">
+                      {monthlyStudentRecaps.reduce((acc, c) => acc + c.hadir, 0)} hr
+                    </td>
+                    <td className="py-3 px-3 text-center text-amber-700 dark:text-amber-400 font-extrabold font-mono">
+                      {monthlyStudentRecaps.reduce((acc, c) => acc + c.terlambat, 0)} hr
+                    </td>
+                    <td className="py-3 px-3 text-center text-indigo-700 dark:text-indigo-400 font-extrabold font-mono">
+                      {monthlyStudentRecaps.reduce((acc, c) => acc + c.sakit, 0)} hr
+                    </td>
+                    <td className="py-3 px-3 text-center text-sky-700 dark:text-sky-400 font-extrabold font-mono">
+                      {monthlyStudentRecaps.reduce((acc, c) => acc + c.izin, 0)} hr
+                    </td>
+                    <td className="py-3 px-3 text-center text-rose-700 dark:text-rose-400 font-extrabold font-mono">
+                      {monthlyStudentRecaps.reduce((acc, c) => acc + c.alpa, 0)} hr
+                    </td>
+                    <td className="py-3 px-3 text-center text-slate-900 dark:text-white font-extrabold font-mono">
+                      {monthlyStudentRecaps.reduce((acc, c) => acc + c.totalHadir, 0)} hr
+                    </td>
+                    <td colSpan={2} className="py-3 px-4 text-right text-xs text-slate-500 dark:text-slate-400">
+                      Bulan {dateRangeLabel}
+                    </td>
+                  </tr>
+                </tfoot>
               )}
-            </tbody>
-          </table>
+            </table>
+          ) : (
+            /* Standard Logs Table */
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 uppercase tracking-wider text-[10px] font-bold border-b border-slate-200 dark:border-slate-700">
+                <tr>
+                  <th className="py-3 px-4">No</th>
+                  <th className="py-3 px-4">Siswa</th>
+                  <th className="py-3 px-4">Kelas</th>
+                  {filterMode !== 'daily' && <th className="py-3 px-4">Tanggal</th>}
+                  <th className="py-3 px-4">Jam Masuk</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Metode</th>
+                  <th className="py-3 px-4">Keterangan</th>
+                  <th className="py-3 px-4 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-900">
+                {filteredTableData.length > 0 ? (
+                  filteredTableData.map((record, index) => {
+                    const studentInfo = students.find((s) => s.id === record.studentId);
+                    return (
+                      <tr key={record.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors">
+                        <td className="py-3 px-4 font-mono text-slate-400 dark:text-slate-500 font-medium">{index + 1}</td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <img
+                              src={studentInfo?.photo || studentInfo?.avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'}
+                              alt={record.studentName}
+                              className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700"
+                            />
+                            <div>
+                              <div className="font-extrabold text-slate-900 dark:text-white">{record.studentName}</div>
+                              <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">NIS: {record.nis}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 font-bold text-slate-700 dark:text-slate-300">{record.classRoom}</td>
+                        {filterMode !== 'daily' && (
+                          <td className="py-3 px-4 font-mono font-semibold text-slate-600 dark:text-slate-400">{record.date}</td>
+                        )}
+                        <td className="py-3 px-4 font-mono font-bold text-indigo-700 dark:text-indigo-400">{record.time} WIB</td>
+                        <td className="py-3 px-4">{getStatusBadge(record.status)}</td>
+                        <td className="py-3 px-4">
+                          <span className="text-[11px] text-slate-600 dark:text-slate-400 flex items-center gap-1.5 font-medium">
+                            <i
+                              className={
+                                record.scannedVia === 'QR Camera'
+                                  ? 'fa-solid fa-camera text-indigo-600 dark:text-indigo-400'
+                                  : 'fa-solid fa-keyboard text-amber-600 dark:text-amber-400'
+                              }
+                            ></i>
+                            {record.scannedVia}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-600 dark:text-slate-400 max-w-xs truncate">
+                          {record.note || '-'}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {studentInfo ? (
+                              <button
+                                onClick={() =>
+                                  openWhatsAppNotification(
+                                    studentInfo,
+                                    record,
+                                    settings.schoolName
+                                  )
+                                }
+                                title={`Kirim WA Otomatis ke Ortu ${record.studentName} (${studentInfo.parentPhone || 'No HP Belum Ada'})`}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors cursor-pointer text-xs flex items-center gap-1.5 font-bold shadow-2xs"
+                              >
+                                <i className="fa-brands fa-whatsapp text-sm"></i>
+                                <span>Kirim WA</span>
+                              </button>
+                            ) : (
+                              <button
+                                disabled
+                                title="Data siswa tidak ditemukan"
+                                className="px-2 py-1 bg-slate-100 text-slate-400 rounded-lg text-xs font-medium cursor-not-allowed"
+                              >
+                                <i className="fa-brands fa-whatsapp text-sm mr-1"></i>
+                                <span>Kirim WA</span>
+                              </button>
+                            )}
+                            <button
+                              onClick={() => onDeleteRecord(record.id)}
+                              title="Hapus riwayat ini"
+                              className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                            >
+                              <i className="fa-solid fa-trash-can"></i>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={8} className="py-12 text-center text-slate-500">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <i className="fa-solid fa-clipboard-question text-3xl text-slate-300"></i>
+                        <p className="font-bold text-sm text-slate-700">Tidak ada data absensi ditemukan</p>
+                        <p className="text-xs text-slate-500">
+                          Gunakan tab Scanner QR untuk melakukan pemindaian atau ubah filter tanggal/pencarian.
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 
