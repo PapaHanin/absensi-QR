@@ -200,6 +200,7 @@ export default function App() {
   const [isAdminProfileModalOpen, setIsAdminProfileModalOpen] = useState(false);
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
   const [isCloudSyncModalOpen, setIsCloudSyncModalOpen] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   // Dark / Light Theme Mode
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -773,29 +774,38 @@ export default function App() {
 
   return (
     <ErrorBoundary fallbackTitle="Terjadi Kendala pada Aplikasi Utama">
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-['Plus_Jakarta_Sans',sans-serif] selection:bg-indigo-500 selection:text-white transition-colors duration-200">
-        {/* Top Header */}
-        <Header
+      <div className="min-h-screen bg-[#4a070e] dark:bg-[#200204] text-slate-800 dark:text-slate-100 flex flex-row font-['Plus_Jakarta_Sans',sans-serif] selection:bg-rose-700 selection:text-white transition-colors duration-200">
+        {/* Locked Sidebar Navigation (Stays fixed on left, does NOT scroll down with content) */}
+        <Sidebar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          todayCount={todayCount}
           settings={settings}
           currentTeacher={currentTeacher}
-          isDarkMode={isDarkMode}
-          onToggleDarkMode={handleToggleDarkMode}
           onOpenLogin={() => setIsLoginModalOpen(true)}
           onLogout={handleTeacherLogout}
           onOpenTeacherManage={() => setIsTeacherModalOpen(true)}
           onOpenAdminProfile={() => setIsAdminProfileModalOpen(true)}
           onOpenGuide={() => setIsGuideModalOpen(true)}
           onOpenCloudSync={() => setIsCloudSyncModalOpen(true)}
+          isOpenMobile={isMobileSidebarOpen}
+          onCloseMobile={() => setIsMobileSidebarOpen(false)}
         />
 
-        {/* Navigation Tabs */}
-        <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} todayCount={todayCount} />
+        {/* Right Column: Header (Date & Dark/Light mode only) and Main Content */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-screen">
+          {/* Top Header - ONLY Date/Time and Dark/Light Mode toggle as requested */}
+          <Header
+            isDarkMode={isDarkMode}
+            onToggleDarkMode={handleToggleDarkMode}
+            onToggleMobileSidebar={() => setIsMobileSidebarOpen(true)}
+          />
 
-        {/* Toast Notifications */}
-        <Toast toasts={toasts} onDismiss={dismissToast} />
+          {/* Toast Notifications */}
+          <Toast toasts={toasts} onDismiss={dismissToast} />
 
-        {/* Main Content View */}
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-24 md:pb-12">
+          {/* Main Content View */}
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-24 md:pb-12">
           {activeTab === 'dashboard' && (
             <ErrorBoundary fallbackTitle="Terjadi Kendala pada Dashboard Rekap">
               <DashboardTab
@@ -922,16 +932,17 @@ export default function App() {
           />
         )}
 
-        {/* Footer with Firebase Cloud status */}
-        <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-4 text-center text-xs text-slate-500 dark:text-slate-400 no-print transition-colors">
-          <div className="flex items-center justify-center gap-2 flex-wrap px-4">
-            <span>&copy; {new Date().getFullYear()} {settings.schoolName} — Sistem Absensi QR Code Siswa</span>
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              Firebase Cloud Connected
-            </span>
-          </div>
-        </footer>
+          {/* Footer with Firebase Cloud status */}
+          <footer className="border-t border-[#5e0d16] dark:border-[#380509] bg-[#340408] dark:bg-[#1a0203] py-4 text-center text-xs text-rose-200/80 dark:text-rose-300/70 no-print transition-colors">
+            <div className="flex items-center justify-center gap-2 flex-wrap px-4">
+              <span>&copy; {new Date().getFullYear()} {settings.schoolName} — Sistem Absensi QR Code Siswa</span>
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                Firebase Cloud Connected
+              </span>
+            </div>
+          </footer>
+        </div>
       </div>
     </ErrorBoundary>
   );
