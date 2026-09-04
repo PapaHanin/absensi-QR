@@ -88,6 +88,23 @@ service cloud.firestore {
              (data.type == 'positive' || data.type == 'negative' || data.type == 'neutral');
     }
 
+    // Validation for ERaporRecap entity (e-Rapor Merdeka - iihh Beres)
+    function isValidERaporRecap(data) {
+      return data.nisn is string && data.nisn.size() <= 64 &&
+             data.namaSiswa is string && data.namaSiswa.size() <= 200 &&
+             data.kelas is string && data.kelas.size() <= 64 &&
+             (data.semester == 1 || data.semester == 2) &&
+             data.tahunAjaran is string && data.tahunAjaran.size() <= 64 &&
+             data.kehadiran is map &&
+             data.kehadiran.sakit is number && data.kehadiran.sakit >= 0 &&
+             data.kehadiran.izin is number && data.kehadiran.izin >= 0 &&
+             data.kehadiran.tanpaKeterangan is number && data.kehadiran.tanpaKeterangan >= 0 &&
+             (!('sakit' in data) || (data.sakit is number && data.sakit >= 0)) &&
+             (!('izin' in data) || (data.izin is number && data.izin >= 0)) &&
+             (!('tanpaKeterangan' in data) || (data.tanpaKeterangan is number && data.tanpaKeterangan >= 0)) &&
+             data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
     // Students Collection
     match /students/{studentId} {
       allow read: if true;
@@ -140,6 +157,13 @@ service cloud.firestore {
       allow create: if isValidId(logId) && isValidBehaviorLog(incoming());
       allow update: if isValidId(logId) && isValidBehaviorLog(incoming()) && incoming().id == existing().id;
       allow delete: if isValidId(logId);
+    }
+
+    // e-Rapor Merdeka Semester Recap Collection (iihh Beres)
+    match /rekap_absensi_ogomojolo/{recapId} {
+      allow read: if true;
+      allow create, update: if isValidId(recapId) && isValidERaporRecap(incoming());
+      allow delete: if isValidId(recapId);
     }
 
     // Test connection doc

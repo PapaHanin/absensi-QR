@@ -5,6 +5,7 @@ export type Gender = 'Laki-laki' | 'Perempuan';
 export interface Student {
   id: string;
   nis: string;
+  nisn?: string;
   name: string;
   classRoom: string;
   gender: Gender;
@@ -35,6 +36,11 @@ export interface SystemSettings {
   headmasterName?: string; // e.g. "Drs. H. Mulyadi, M.Pd"
   headmasterNip?: string; // e.g. "19680512 199403 1 005"
   schoolCity?: string; // e.g. "Jakarta"
+  announcementTitle?: string;
+  announcementContent?: string;
+  announcementVersion?: string;
+  announcementDate?: string;
+  announcementActive?: boolean;
 }
 
 export interface QRPayload {
@@ -100,6 +106,25 @@ export interface BehaviorLog {
   description: string;
   recordedBy: string; // Teacher or Admin name
   createdAt: string;
+}
+
+export interface ERaporKehadiran {
+  sakit: number;
+  izin: number;
+  tanpaKeterangan: number;
+}
+
+export interface ERaporRecapDoc {
+  nisn: string;
+  namaSiswa: string;
+  kelas: string;
+  semester: number; // 1 | 2
+  tahunAjaran: string; // e.g. "2024/2025"
+  sakit: number;
+  izin: number;
+  tanpaKeterangan: number;
+  kehadiran: ERaporKehadiran;
+  updatedAt: string; // ISO_TIMESTAMP
 }
 
 

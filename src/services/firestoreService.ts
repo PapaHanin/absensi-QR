@@ -8,8 +8,8 @@ import {
   getDocs,
   writeBatch,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
-import { Student, AttendanceRecord, SystemSettings, Teacher, ScheduledLeave, BehaviorLog } from '../types';
+import { db, iihhBeresDb, IIHH_BERES_DATABASE_ID, handleFirestoreError, OperationType } from '../firebase';
+import { Student, AttendanceRecord, SystemSettings, Teacher, ScheduledLeave, BehaviorLog, ERaporRecapDoc } from '../types';
 import { CloudSyncPayload } from '../utils/cloudSync';
 
 /**
@@ -32,6 +32,7 @@ export const COLLECTIONS = {
   CLOUD_SYNC: 'cloud_sync',
   LEAVES: 'leaves',
   BEHAVIOR_LOGS: 'behavior_logs',
+  REKAP_ABSENSI_OGOMOJOLO: 'rekap_absensi_ogomojolo',
 };
 
 /**
@@ -454,3 +455,158 @@ export async function seedInitialFirestoreDataIfEmpty(
     console.warn('Could not check or seed Firestore (running in offline/local fallback mode):', error);
   }
 }
+
+/**
+ * Generates an idempotent, valid document ID for rekap_absensi_ogomojolo using student's NISN.
+ * As requested: "simpan dokumen ke koleksi 'rekap_absensi_ogomojolo' dengan ID dokumen = NISN siswa"
+ */
+export function generateERaporDocId(nisn: string, semester?: number, tahunAjaran?: string): string {
+  const cleanNisn = (nisn || '').trim();
+  if (cleanNisn) {
+    return cleanNisn;
+  }
+  // Fallback only if student has no NISN filled yet
+  const cleanTahun = (tahunAjaran || 'default').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30);
+  return `no_nisn_sem${semester || 1}_${cleanTahun}`;
+}
+
+/**
+ * Builds the exact document payload requested for e-Rapor Merdeka (iihh Beres):
+ * {
+ *   nisn: "0012345678",
+ *   namaSiswa: "Nama Siswa",
+ *   kelas: "Kelas 4",
+ *   semester: 1,
+ *   tahunAjaran: "2024/2025",
+ *   sakit: 2,
+ *   izin: 1,
+ *   tanpaKeterangan: 0,
+ *   kehadiran: { sakit: 2, izin: 1, tanpaKeterangan: 0 },
+ *   updatedAt: ISO_STRING
+ * }
+ */
+export function buildERaporPayload(recap: ERaporRecapDoc) {
+  const sakit = Number(recap.sakit ?? recap.kehadiran?.sakit) || 0;
+  const izin = Number(recap.izin ?? recap.kehadiran?.izin) || 0;
+  const tanpaKeterangan = Number(recap.tanpaKeterangan ?? recap.kehadiran?.tanpaKeterangan) || 0;
+
+  return sanitizeForFirestore({
+    nisn: String(recap.nisn || '').trim(),
+    namaSiswa: recap.namaSiswa,
+    kelas: recap.kelas,
+    semester: Number(recap.semester) || 1,
+    tahunAjaran: recap.tahunAjaran,
+    sakit,
+    izin,
+    tanpaKeterangan,
+    kehadiran: {
+      sakit,
+      izin,
+      tanpaKeterangan,
+    },
+    updatedAt: recap.updatedAt || new Date().toISOString(),
+  });
+}
+
+/**
+ * Saves a single e-Rapor recap document to Firestore collection `rekap_absensi_ogomojolo`
+ * Target database: ai-studio-iihhberes-db02674d-a027-43d4-b17e-50573c47075a (and local backup)
+ */
+export async function saveERaporRecapToFirestore(recap: ERaporRecapDoc): Promise<void> {
+  const docId = generateERaporDocId(recap.nisn, recap.semester, recap.tahunAjaran);
+  const path = `${COLLECTIONS.REKAP_ABSENSI_OGOMOJOLO}/${docId}`;
+  const payload = buildERaporPayload(recap);
+
+  try {
+    // Write directly to target e-Rapor database (iihh Beres)
+    await setDoc(doc(iihhBeresDb, COLLECTIONS.REKAP_ABSENSI_OGOMOJOLO, docId), payload);
+
+    // Also write to local app database as backup
+    try {
+      await setDoc(doc(db, COLLECTIONS.REKAP_ABSENSI_OGOMOJOLO, docId), payload);
+    } catch {
+      // Local backup failure is non-fatal
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/**
+ * Bulk uploads student attendance recaps to Firestore collection `rekap_absensi_ogomojolo`
+ * Writes to the target database `ai-studio-iihhberes-db02674d-a027-43d4-b17e-50573c47075a`
+ * with ID dokumen = NISN siswa.
+ * Also keeps a backup in the current app database.
+ */
+export async function batchSyncERaporRecapsToFirestore(
+  recaps: ERaporRecapDoc[],
+  onProgress?: (current: number, total: number) => void
+): Promise<{ success: boolean; count: number; destinationDb: string }> {
+  if (recaps.length === 0) return { success: true, count: 0, destinationDb: IIHH_BERES_DATABASE_ID };
+  const path = COLLECTIONS.REKAP_ABSENSI_OGOMOJOLO;
+  try {
+    const CHUNK_SIZE = 400;
+    let completedCount = 0;
+    for (let i = 0; i < recaps.length; i += CHUNK_SIZE) {
+      const chunk = recaps.slice(i, i + CHUNK_SIZE);
+      
+      // Batch for target e-Rapor database (iihh Beres)
+      const targetBatch = writeBatch(iihhBeresDb);
+      // Batch for local app database backup
+      const localBatch = writeBatch(db);
+
+      for (const recap of chunk) {
+        const docId = generateERaporDocId(recap.nisn, recap.semester, recap.tahunAjaran);
+        const payload = buildERaporPayload(recap);
+
+        const targetRef = doc(iihhBeresDb, COLLECTIONS.REKAP_ABSENSI_OGOMOJOLO, docId);
+        targetBatch.set(targetRef, payload);
+
+        const localRef = doc(db, COLLECTIONS.REKAP_ABSENSI_OGOMOJOLO, docId);
+        localBatch.set(localRef, payload);
+      }
+
+      // Commit to target database
+      await targetBatch.commit();
+
+      // Commit backup to local database silently
+      try {
+        await localBatch.commit();
+      } catch (backupErr) {
+        console.warn('Local database backup commit note:', backupErr);
+      }
+
+      completedCount += chunk.length;
+      if (onProgress) {
+        onProgress(completedCount, recaps.length);
+      }
+    }
+    return { success: true, count: completedCount, destinationDb: IIHH_BERES_DATABASE_ID };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/**
+ * Fetches all student recap records currently in `rekap_absensi_ogomojolo`
+ * Checks the target e-Rapor database first, falling back to local database.
+ */
+export async function fetchERaporRecapsFromFirestore(): Promise<ERaporRecapDoc[]> {
+  const path = COLLECTIONS.REKAP_ABSENSI_OGOMOJOLO;
+  try {
+    let snap;
+    try {
+      snap = await getDocs(collection(iihhBeresDb, path));
+    } catch {
+      snap = await getDocs(collection(db, path));
+    }
+    const list: ERaporRecapDoc[] = [];
+    snap.forEach((docSnap) => {
+      list.push(docSnap.data() as ERaporRecapDoc);
+    });
+    return list;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+

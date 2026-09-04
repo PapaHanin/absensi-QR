@@ -29,6 +29,8 @@ import { TeacherManagementModal } from './components/TeacherManagementModal';
 import { AdminProfileModal } from './components/AdminProfileModal';
 import { GuideModal } from './components/GuideModal';
 import { CloudSyncModal } from './components/CloudSyncModal';
+import { DapodikAnnouncementModal, CURRENT_ANNOUNCEMENT_VERSION } from './components/DapodikAnnouncementModal';
+import { ERaporSyncModal } from './components/ERaporSyncModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { testFirestoreConnection } from './firebase';
 import {
@@ -200,7 +202,18 @@ export default function App() {
   const [isAdminProfileModalOpen, setIsAdminProfileModalOpen] = useState(false);
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
   const [isCloudSyncModalOpen, setIsCloudSyncModalOpen] = useState(false);
+  const [isERaporSyncModalOpen, setIsERaporSyncModalOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  // Dapodik-style Announcement Pop-up on initial enter
+  const [isAnnouncementOpen, setIsAnnouncementOpen] = useState<boolean>(() => {
+    try {
+      const acknowledgedVersion = safeGetItem('dapodik_announcement_acknowledged');
+      return acknowledgedVersion !== CURRENT_ANNOUNCEMENT_VERSION;
+    } catch {
+      return true;
+    }
+  });
 
   // Dark / Light Theme Mode
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -253,6 +266,27 @@ export default function App() {
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const handleCloseAnnouncement = useCallback((dontShowAgain: boolean) => {
+    setIsAnnouncementOpen(false);
+    if (dontShowAgain) {
+      const targetVer = settings.announcementVersion || CURRENT_ANNOUNCEMENT_VERSION;
+      safeSetItem('dapodik_announcement_acknowledged', targetVer);
+    }
+  }, [settings.announcementVersion]);
+
+  const handleOpenAnnouncement = useCallback(() => {
+    setIsAnnouncementOpen(true);
+  }, []);
+
+  const handleResetAnnouncementStatus = useCallback(() => {
+    safeRemoveItem('dapodik_announcement_acknowledged');
+    addToast(
+      'Pop-up Direset',
+      'Pemberitahuan ala Dapodik akan otomatis muncul kembali saat membuka beranda.',
+      'info'
+    );
+  }, [addToast]);
 
   // Save to LocalStorage whenever states update (fast local cache with quota management)
   useEffect(() => {
@@ -788,6 +822,8 @@ export default function App() {
           onOpenAdminProfile={() => setIsAdminProfileModalOpen(true)}
           onOpenGuide={() => setIsGuideModalOpen(true)}
           onOpenCloudSync={() => setIsCloudSyncModalOpen(true)}
+          onOpenAnnouncement={handleOpenAnnouncement}
+          onOpenERaporSync={() => setIsERaporSyncModalOpen(true)}
           isOpenMobile={isMobileSidebarOpen}
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
         />
@@ -824,6 +860,7 @@ export default function App() {
                 onDeleteLeave={handleDeleteLeave}
                 onSaveBehaviorLog={handleSaveBehaviorLog}
                 onDeleteBehaviorLog={handleDeleteBehaviorLog}
+                onOpenERaporSync={() => setIsERaporSyncModalOpen(true)}
               />
             </ErrorBoundary>
           )}
@@ -857,6 +894,7 @@ export default function App() {
                 onDeleteLeave={handleDeleteLeave}
                 onSaveBehaviorLog={handleSaveBehaviorLog}
                 onDeleteBehaviorLog={handleDeleteBehaviorLog}
+                onOpenERaporSync={() => setIsERaporSyncModalOpen(true)}
               />
             </ErrorBoundary>
           )}
@@ -867,11 +905,14 @@ export default function App() {
                 students={students}
                 attendanceRecords={attendanceRecords}
                 settings={settings}
+                currentTeacher={currentTeacher}
                 isDarkMode={isDarkMode}
                 onToggleDarkMode={handleToggleDarkMode}
                 onUpdateSettings={handleUpdateSettings}
                 onRecordAttendance={handleRecordAttendance}
                 onResetData={handleResetData}
+                onOpenAnnouncement={handleOpenAnnouncement}
+                onResetAnnouncementStatus={handleResetAnnouncementStatus}
               />
             </ErrorBoundary>
           )}
@@ -929,6 +970,34 @@ export default function App() {
             onRestoreData={handleRestoreData}
             onClose={() => setIsCloudSyncModalOpen(false)}
             onShowToast={addToast}
+          />
+        )}
+
+        {/* Dapodik Announcement & Feature Update Pop-up Modal */}
+        {isAnnouncementOpen && (
+          <DapodikAnnouncementModal
+            isOpen={isAnnouncementOpen}
+            onClose={handleCloseAnnouncement}
+            settings={settings}
+            currentTeacher={currentTeacher}
+            onUpdateSettings={handleUpdateSettings}
+            onNavigateToSettings={() => {
+              setActiveTab('simulator');
+            }}
+          />
+        )}
+
+        {/* e-Rapor Merdeka Semester Recap Synchronization Modal (iihh Beres) */}
+        {isERaporSyncModalOpen && (
+          <ERaporSyncModal
+            isOpen={isERaporSyncModalOpen}
+            onClose={() => setIsERaporSyncModalOpen(false)}
+            students={students}
+            attendanceRecords={attendanceRecords}
+            scheduledLeaves={scheduledLeaves}
+            settings={settings}
+            currentTeacher={currentTeacher}
+            onSuccessToast={(title, msg) => addToast(title, msg, 'success')}
           />
         )}
 

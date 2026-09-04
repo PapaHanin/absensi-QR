@@ -122,6 +122,27 @@
         "createdAt": { "type": "string", "description": "Waktu dibuat" }
       },
       "required": ["id", "studentId", "studentName", "classRoom", "date", "type", "title", "points"]
+    },
+    "ERaporRecap": {
+      "title": "ERaporRecap",
+      "description": "Rekap kehadiran semesteran siswa untuk integrasi aplikasi e-Rapor Merdeka (iihh Beres)",
+      "type": "object",
+      "properties": {
+        "nisn": { "type": "string", "description": "NISN siswa 10 digit" },
+        "namaSiswa": { "type": "string", "description": "Nama lengkap murid" },
+        "kelas": { "type": "string", "description": "Tingkat kelas siswa (contoh: Kelas 4)" },
+        "semester": { "type": "number", "enum": [1, 2], "description": "Semester 1 (Ganjil) atau 2 (Genap)" },
+        "tahunAjaran": { "type": "string", "description": "Tahun ajaran akademik (contoh: 2024/2025)" },
+        "sakit": { "type": "number", "description": "Total sakit sepanjang semester" },
+        "izin": { "type": "number", "description": "Total izin sepanjang semester" },
+        "tanpaKeterangan": { "type": "number", "description": "Total tanpa keterangan (alpa) sepanjang semester" },
+        "kehadiran": {
+          "type": "object",
+          "description": "Total kehadiran semester (sakit, izin, tanpaKeterangan)"
+        },
+        "updatedAt": { "type": "string", "description": "Waktu pembaruan ISO 8601 timestamp" }
+      },
+      "required": ["nisn", "namaSiswa", "kelas", "semester", "tahunAjaran", "kehadiran", "updatedAt"]
     }
   },
   "firestore": {
@@ -152,6 +173,10 @@
     "/behavior_logs/{logId}": {
       "schema": "BehaviorLog",
       "description": "Koleksi buku catatan pelanggaran dan poin kebaikan siswa"
+    },
+    "/rekap_absensi_ogomojolo/{recapId}": {
+      "schema": "ERaporRecap",
+      "description": "Koleksi sinkronisasi rekap absensi semester siswa ke aplikasi e-Rapor Merdeka (iihh Beres)"
     }
   }
 }

@@ -13,6 +13,8 @@ interface SidebarProps {
   onOpenCloudSync: () => void;
   onOpenAdminProfile?: () => void;
   onOpenGuide?: () => void;
+  onOpenAnnouncement?: () => void;
+  onOpenERaporSync?: () => void;
   isOpenMobile?: boolean;
   onCloseMobile?: () => void;
 }
@@ -29,6 +31,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenCloudSync,
   onOpenAdminProfile,
   onOpenGuide,
+  onOpenAnnouncement,
+  onOpenERaporSync,
   isOpenMobile = false,
   onCloseMobile,
 }) => {
@@ -113,16 +117,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {navItems.map((item) => {
               const isActive = activeTab === item.id;
               return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => handleSelectTab(item.id)}
-                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-gradient-to-r from-red-700 to-rose-800 text-white shadow-sm shadow-red-950/40 border border-red-500/30'
-                      : 'text-rose-200 hover:bg-[#45070d] hover:text-white'
-                  }`}
-                >
+                <React.Fragment key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectTab(item.id)}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-gradient-to-r from-red-700 to-rose-800 text-white shadow-sm shadow-red-950/40 border border-red-500/30'
+                        : 'text-rose-200 hover:bg-[#45070d] hover:text-white'
+                    }`}
+                  >
                   <div className="flex items-center gap-3">
                     <i
                       className={`${item.icon} text-sm w-4 text-center ${
@@ -151,8 +155,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                   </div>
                 </button>
-              );
-            })}
+                {item.id === 'students' && onOpenERaporSync && (
+                  <div className="pt-1 pb-0.5 px-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onOpenERaporSync();
+                        if (onCloseMobile) onCloseMobile();
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-200 border border-emerald-500/30 hover:border-emerald-400/50 shadow-xs group cursor-pointer"
+                      title="Kirim Rekap Kehadiran Semester Siswa ke e-Rapor Merdeka (iihh Beres)"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-5 h-5 rounded-lg bg-emerald-500/20 text-emerald-300 flex items-center justify-center text-[10px] group-hover:scale-110 transition-transform shrink-0">
+                          <i className="fa-solid fa-cloud-arrow-up"></i>
+                        </div>
+                        <span className="truncate text-[11px]">Kirim Rekap ke e-Rapor</span>
+                      </div>
+                      <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 shrink-0">
+                        e-Rapor
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </React.Fragment>
+            );
+          })}
           </nav>
         </div>
 
@@ -173,6 +201,46 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 <i className="fa-solid fa-mobile-screen-button text-emerald-400 text-sm w-4 text-center"></i>
                 <span className="truncate">Panduan HP Guru</span>
+              </button>
+            )}
+
+            {onOpenAnnouncement && (
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenAnnouncement();
+                  if (onCloseMobile) onCloseMobile();
+                }}
+                className={`w-full flex items-center justify-between px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                  currentTeacher?.role === 'admin'
+                    ? 'text-amber-200 bg-amber-950/60 hover:bg-amber-900/60 border border-amber-800/60'
+                    : 'text-rose-200 bg-[#42070e]/80 hover:bg-[#520a12] border border-[#660f1a]/70'
+                }`}
+                title={
+                  currentTeacher?.role === 'admin'
+                    ? 'Pemberitahuan Sistem (Mode Admin: Dapat Mengedit)'
+                    : 'Pemberitahuan Sistem (Mode Guru: Hanya Melihat - Terkunci)'
+                }
+              >
+                <div className="flex items-center gap-3 truncate">
+                  <i
+                    className={`fa-solid fa-bullhorn text-sm w-4 text-center shrink-0 ${
+                      currentTeacher?.role === 'admin' ? 'text-amber-400' : 'text-rose-300'
+                    }`}
+                  ></i>
+                  <span className="truncate">Pemberitahuan Sistem</span>
+                </div>
+                {currentTeacher?.role === 'admin' ? (
+                  <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-400 text-slate-900 shrink-0 flex items-center gap-1">
+                    <i className="fa-solid fa-pen-to-square text-[8px]"></i>
+                    Admin
+                  </span>
+                ) : (
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-900/80 text-rose-200 border border-rose-700/50 shrink-0 flex items-center gap-1">
+                    <i className="fa-solid fa-lock text-[8px]"></i>
+                    Lihat
+                  </span>
+                )}
               </button>
             )}
 
