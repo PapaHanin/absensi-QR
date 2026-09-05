@@ -102,15 +102,28 @@ service cloud.firestore {
              (!('sakit' in data) || (data.sakit is number && data.sakit >= 0)) &&
              (!('izin' in data) || (data.izin is number && data.izin >= 0)) &&
              (!('tanpaKeterangan' in data) || (data.tanpaKeterangan is number && data.tanpaKeterangan >= 0)) &&
+             (!('tanggalMulai' in data) || data.tanggalMulai is string) &&
+             (!('tanggalSelesai' in data) || data.tanggalSelesai is string) &&
+             (!('tipePeriode' in data) || data.tipePeriode is string) &&
+             (!('periodeLabel' in data) || data.periodeLabel is string) &&
+             (!('bulan' in data) || data.bulan is string) &&
              data.updatedAt is string && data.updatedAt.size() <= 64;
     }
 
     // Students Collection
     match /students/{studentId} {
       allow read: if true;
-      allow create: if isValidId(studentId) && isValidStudent(incoming());
-      allow update: if isValidId(studentId) && isValidStudent(incoming()) && incoming().id == existing().id;
+      allow create, update: if isValidId(studentId);
       allow delete: if isValidId(studentId);
+    }
+
+    // Data Siswa Collections (alias used in e-Rapor / iihh Beres)
+    match /data_siswa/{studentId} {
+      allow read, write: if isValidId(studentId);
+    }
+
+    match /siswa/{studentId} {
+      allow read, write: if isValidId(studentId);
     }
 
     // Attendance Collection

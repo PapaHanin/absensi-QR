@@ -10,7 +10,8 @@ import {
 import {
   batchSyncERaporRecapsToFirestore,
   fetchERaporRecapsFromFirestore,
-  saveERaporRecapToFirestore,
+  fetchERaporStudentsFromFirestore,
+  buildERaporStudentPayload,
 } from '../services/firestoreService';
 
 interface ERaporSyncModalProps {
@@ -24,6 +25,8 @@ interface ERaporSyncModalProps {
   onSuccessToast?: (title: string, message: string) => void;
 }
 
+export type SyncPeriodMode = 'bulanan' | 'rentang_tanggal' | 'semester';
+
 export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
   isOpen,
   onClose,
@@ -31,16 +34,38 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
   attendanceRecords,
   scheduledLeaves = [],
   settings,
-  currentTeacher,
   onSuccessToast,
 }) => {
   // Determine current semester default: July-Dec is Semester 1, Jan-June is Semester 2
-  const currentMonth = new Date().getMonth() + 1; // 1-12
-  const defaultSemester = currentMonth >= 7 ? 1 : 2;
+  const currentMonthNum = new Date().getMonth() + 1; // 1-12
+  const defaultSemester = currentMonthNum >= 7 ? 1 : 2;
 
   const [semester, setSemester] = useState<1 | 2>(defaultSemester as 1 | 2);
   const [tahunAjaran, setTahunAjaran] = useState<string>(settings.academicYear || '2024/2025');
   const [selectedClass, setSelectedClass] = useState<string>('Semua');
+
+  // Period mode selection: 'bulanan', 'rentang_tanggal', or 'semester'
+  const [periodMode, setPeriodMode] = useState<SyncPeriodMode>('bulanan');
+
+  // Month selector (YYYY-MM)
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
+    const now = new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    return `${now.getFullYear()}-${mm}`;
+  });
+
+  // Custom date range selectors (YYYY-MM-DD)
+  const [customStartDate, setCustomStartDate] = useState<string>(() => {
+    const now = new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    return `${now.getFullYear()}-${mm}-01`;
+  });
+  const [customEndDate, setCustomEndDate] = useState<string>(() => {
+    const now = new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    return `${now.getFullYear()}-${mm}-${dd}`;
+  });
 
   // Parse start and end year from academic year string (e.g. "2024/2025")
   const parsedYears = useMemo(() => {
@@ -53,7 +78,7 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
   }, [tahunAjaran]);
 
   // Default date ranges for Semester 1 and 2
-  const defaultDateRange = useMemo(() => {
+  const semesterDateRange = useMemo(() => {
     if (semester === 1) {
       return {
         start: `${parsedYears.startYear}-07-01`,
@@ -67,17 +92,50 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
     }
   }, [semester, parsedYears]);
 
-  const [customRangeActive, setCustomRangeActive] = useState<boolean>(false);
-  const [startDate, setStartDate] = useState<string>(defaultDateRange.start);
-  const [endDate, setEndDate] = useState<string>(defaultDateRange.end);
+  // Indonesian month names helper
+  const MONTH_NAMES = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+  ];
 
-  // Update dates when semester or academic year changes
-  useEffect(() => {
-    if (!customRangeActive) {
-      setStartDate(defaultDateRange.start);
-      setEndDate(defaultDateRange.end);
+  // Compute effective date window and display label based on chosen periodMode
+  const { effectiveStartDate, effectiveEndDate, effectivePeriodeLabel, daysCount } = useMemo(() => {
+    if (periodMode === 'bulanan') {
+      const parts = (selectedMonth || '2024-09').split('-');
+      const y = parseInt(parts[0], 10) || new Date().getFullYear();
+      const m = parseInt(parts[1], 10) || 1;
+      const lastDay = new Date(y, m, 0).getDate();
+      const s = `${y}-${String(m).padStart(2, '0')}-01`;
+      const e = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+      const mName = MONTH_NAMES[m - 1] || `Bulan ${m}`;
+      return {
+        effectiveStartDate: s,
+        effectiveEndDate: e,
+        effectivePeriodeLabel: `Bulan ${mName} ${y} (1 s.d. ${lastDay} ${mName} ${y})`,
+        daysCount: lastDay,
+      };
+    } else if (periodMode === 'rentang_tanggal') {
+      const s = customStartDate || `${new Date().getFullYear()}-01-01`;
+      const e = customEndDate || s;
+      const d1 = new Date(s);
+      const d2 = new Date(e);
+      const diffMs = Math.max(0, d2.getTime() - d1.getTime());
+      const count = Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1;
+      return {
+        effectiveStartDate: s,
+        effectiveEndDate: e,
+        effectivePeriodeLabel: `Rentang Tanggal: ${s} s.d. ${e} (${count} Hari)`,
+        daysCount: count,
+      };
+    } else {
+      return {
+        effectiveStartDate: semesterDateRange.start,
+        effectiveEndDate: semesterDateRange.end,
+        effectivePeriodeLabel: `Semester ${semester} (${tahunAjaran}) [${semesterDateRange.start} s.d. ${semesterDateRange.end}]`,
+        daysCount: 180,
+      };
     }
-  }, [defaultDateRange, customRangeActive]);
+  }, [periodMode, selectedMonth, customStartDate, customEndDate, semesterDateRange, semester, tahunAjaran]);
 
   // Unique list of student classes
   const classesList = useMemo(() => {
@@ -112,21 +170,21 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
     () => new Set(students.map((s) => s.id))
   );
 
-  // When class filter changes, keep relevant selected students
+  // When class filter changes, select all relevant students
   useEffect(() => {
     setSelectedStudentIds(new Set(filteredStudents.map((s) => s.id)));
   }, [selectedClass, filteredStudents]);
 
-  // Calculate attendance records per student
+  // Calculate attendance records per student for the active period window
   const studentRecapList = useMemo<ERaporRecapDoc[]>(() => {
-    const rangeStart = startDate;
-    const rangeEnd = endDate;
+    const rangeStart = effectiveStartDate;
+    const rangeEnd = effectiveEndDate;
 
     return filteredStudents.map((student) => {
       // Find manual override if exists
       const override = manualOverrides[student.id];
 
-      // Clean NISN: prioritize override, then student.nisn, then student.nis, then padded NIS
+      // Clean NISN: prioritize override, then student.nisn, then student.nis, then student.id
       const rawNisn = override?.nisn ?? (student.nisn || student.nis || student.id);
       const nisn = String(rawNisn).trim();
 
@@ -134,12 +192,12 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
       const rawClass = student.classRoom || 'Kelas 1';
       const kelas = rawClass.toLowerCase().startsWith('kelas') ? rawClass : `Kelas ${rawClass}`;
 
-      // Calculate auto attendance in date range
+      // Calculate auto attendance in chosen date range
       let autoSakit = 0;
       let autoIzin = 0;
       let autoAlpa = 0;
 
-      // Filter attendance records within the semester date window
+      // Filter attendance records strictly within date window
       attendanceRecords.forEach((att) => {
         if (att.studentId === student.id || att.nis === student.nis) {
           if (!att.date || (att.date >= rangeStart && att.date <= rangeEnd)) {
@@ -150,22 +208,19 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
         }
       });
 
-      // Also account for scheduled multi-day leaves if applicable
+      // Account for scheduled multi-day leaves within the date range
       scheduledLeaves.forEach((leave) => {
         if (leave.studentId === student.id && leave.status !== 'Dibatalkan') {
-          // Check date overlap
           if (leave.endDate >= rangeStart && leave.startDate <= rangeEnd) {
-            // Count overlapping days if not already in attendanceRecords
             const lStart = new Date(leave.startDate > rangeStart ? leave.startDate : rangeStart);
             const lEnd = new Date(leave.endDate < rangeEnd ? leave.endDate : rangeEnd);
             const diffTime = Math.max(0, lEnd.getTime() - lStart.getTime());
-            const daysCount = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+            const daysInLeave = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
 
             if (leave.type === 'Sakit') {
-              // Add difference if higher
-              if (daysCount > autoSakit) autoSakit = daysCount;
+              if (daysInLeave > autoSakit) autoSakit = daysInLeave;
             } else if (leave.type === 'Izin' || leave.type === 'Dispensasi') {
-              if (daysCount > autoIzin) autoIzin = daysCount;
+              if (daysInLeave > autoIzin) autoIzin = daysInLeave;
             }
           }
         }
@@ -194,6 +249,11 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
           izin: izinCount,
           tanpaKeterangan: tanpaKeteranganCount,
         },
+        tipePeriode: periodMode,
+        periodeLabel: effectivePeriodeLabel,
+        tanggalMulai: effectiveStartDate,
+        tanggalSelesai: effectiveEndDate,
+        bulan: periodMode === 'bulanan' ? selectedMonth : undefined,
         updatedAt: new Date().toISOString(),
       };
     });
@@ -201,8 +261,11 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
     filteredStudents,
     attendanceRecords,
     scheduledLeaves,
-    startDate,
-    endDate,
+    effectiveStartDate,
+    effectiveEndDate,
+    effectivePeriodeLabel,
+    periodMode,
+    selectedMonth,
     semester,
     tahunAjaran,
     manualOverrides,
@@ -214,13 +277,15 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
   const [syncSuccessMessage, setSyncSuccessMessage] = useState<string | null>(null);
   const [syncErrorMessage, setSyncErrorMessage] = useState<string | null>(null);
 
-  // JSON Preview modal / drawer state
+  // JSON Preview modal state
   const [previewRecap, setPreviewRecap] = useState<ERaporRecapDoc | null>(null);
+  const [previewTab, setPreviewTab] = useState<'recap' | 'student'>('recap');
   const [copiedNotification, setCopiedNotification] = useState<boolean>(false);
 
   // Existing Cloud Records
   const [isCheckingCloud, setIsCheckingCloud] = useState<boolean>(false);
   const [cloudRecords, setCloudRecords] = useState<ERaporRecapDoc[] | null>(null);
+  const [cloudStudentCount, setCloudStudentCount] = useState<number>(0);
   const [showCloudHistory, setShowCloudHistory] = useState<boolean>(false);
 
   // Toggle select all
@@ -281,23 +346,24 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
         updatedAt: timestamp,
       }));
 
-      const res = await batchSyncERaporRecapsToFirestore(payload, (current, total) => {
+      // Pass the students list so both attendance recaps AND full student data are synced to iihh Beres
+      const res = await batchSyncERaporRecapsToFirestore(payload, students, (current, total) => {
         setSyncProgress({ current, total });
       });
 
       setSyncSuccessMessage(
-        `Berhasil mengirim rekap absensi ${res.count} siswa ke database e-Rapor Merdeka (iihh Beres)! Koleksi: 'rekap_absensi_ogomojolo', ID Dokumen: NISN Siswa.`
+        `Berhasil mengirim rekap absensi (${res.count} siswa) & data profil siswa (${res.studentCount} siswa) ke database e-Rapor Merdeka (iihh Beres)! Disimpan di koleksi 'rekap_absensi_ogomojolo', 'students', dan 'data_siswa' (ID Dokumen: NISN Siswa).`
       );
       if (onSuccessToast) {
         onSuccessToast(
           'Sinkronisasi e-Rapor Berhasil',
-          `${res.count} data rekap kehadiran semester disimpan ke koleksi rekap_absensi_ogomojolo (ID Dokumen: NISN).`
+          `${res.count} rekap kehadiran (${effectivePeriodeLabel}) & data profil siswa telah tersimpan di e-Rapor (iihh Beres).`
         );
       }
     } catch (err: any) {
-      console.error('Error syncing e-rapor recaps:', err);
+      console.error('Error syncing e-rapor recaps & students:', err);
       setSyncErrorMessage(
-        err?.message || 'Terjadi kendala saat menghubungkan ke Firestore rekap_absensi_ogomojolo.'
+        err?.message || 'Terjadi kendala saat menghubungkan ke Firestore e-Rapor Merdeka (iihh Beres).'
       );
     } finally {
       setIsSyncing(false);
@@ -308,8 +374,12 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
   const handleFetchCloudRecords = async () => {
     setIsCheckingCloud(true);
     try {
-      const records = await fetchERaporRecapsFromFirestore();
+      const [records, cloudStudents] = await Promise.all([
+        fetchERaporRecapsFromFirestore(),
+        fetchERaporStudentsFromFirestore(),
+      ]);
       setCloudRecords(records);
+      setCloudStudentCount(cloudStudents.length);
       setShowCloudHistory(true);
     } catch (err: any) {
       console.error('Error fetching cloud recaps:', err);
@@ -328,16 +398,39 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
 
   // Download all as JSON file
   const handleDownloadJsonBackup = () => {
-    const blob = new Blob([JSON.stringify(studentRecapList, null, 2)], {
+    const dataToExport = {
+      periode: effectivePeriodeLabel,
+      tipePeriode: periodMode,
+      tanggalMulai: effectiveStartDate,
+      tanggalSelesai: effectiveEndDate,
+      semester,
+      tahunAjaran,
+      totalSiswa: studentRecapList.length,
+      rekapAbsensi: studentRecapList,
+      dataSiswa: filteredStudents.map((s) => {
+        const recap = studentRecapList.find((r) => r.nisn === s.nisn || r.nisn === s.id);
+        return buildERaporStudentPayload(s, recap);
+      }),
+    };
+
+    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], {
       type: 'application/json',
     });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `rekap_absensi_erapor_sem${semester}_${tahunAjaran.replace(/[\/\s]/g, '-')}.json`;
+    const periodSlug = periodMode === 'bulanan' ? selectedMonth : `${effectiveStartDate}_sd_${effectiveEndDate}`;
+    link.download = `rekap_absensi_erapor_${periodSlug}_sem${semester}_${tahunAjaran.replace(/[\/\s]/g, '-')}.json`;
     link.click();
     URL.revokeObjectURL(url);
   };
+
+  // Get matching student profile for preview
+  const previewStudentProfile = useMemo(() => {
+    if (!previewRecap) return null;
+    const found = students.find((s) => s.nisn === previewRecap.nisn || s.nis === previewRecap.nisn || s.id === previewRecap.nisn);
+    return buildERaporStudentPayload(found || { id: previewRecap.nisn, name: previewRecap.namaSiswa, classRoom: previewRecap.kelas }, previewRecap);
+  }, [previewRecap, students]);
 
   if (!isOpen) return null;
 
@@ -353,18 +446,20 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
             <div>
               <div className="flex flex-wrap items-center gap-2 mb-1">
                 <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
-                  Sinkronisasi Rekap Kehadiran ke e-Rapor Merdeka
+                  Sinkronisasi Rekap Kehadiran & Data Siswa ke e-Rapor Merdeka
                 </h2>
-                <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-500 text-slate-950 uppercase tracking-wide">
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-400 text-slate-950 uppercase tracking-wide">
                   iihh Beres
                 </span>
                 <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-500/30 font-mono">
-                  Firestore: rekap_absensi_ogomojolo
+                  rekap_absensi_ogomojolo
+                </span>
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-teal-950/80 text-teal-300 border border-teal-500/30 font-mono">
+                  data_siswa / students
                 </span>
               </div>
               <p className="text-xs text-emerald-100/80 leading-relaxed">
-                Hitung total kehadiran per semester (Sakit, Izin, Tanpa Keterangan) berdasarkan NISN
-                dan unggah ke database e-Rapor.
+                Kirim rekap absensi fleksibel (per bulan, rentang tanggal, atau semester) dan data profil lengkap siswa langsung ke Google Cloud Firestore aplikasi e-Rapor Merdeka.
               </p>
             </div>
           </div>
@@ -377,14 +472,120 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
           </button>
         </div>
 
-        {/* Configuration Bar */}
+        {/* Period Mode Selector Ribbon */}
+        <div className="px-4 py-3 bg-emerald-50/80 dark:bg-emerald-950/30 border-b border-emerald-200 dark:border-emerald-900/50 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <span className="text-[11px] font-extrabold uppercase text-emerald-900 dark:text-emerald-300 mr-1 flex items-center gap-1">
+              <i className="fa-solid fa-filter text-emerald-600"></i>
+              <span>Pilihan Periode:</span>
+            </span>
+
+            {/* Mode 1: Per Bulan */}
+            <button
+              type="button"
+              onClick={() => setPeriodMode('bulanan')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+                periodMode === 'bulanan'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <i className="fa-regular fa-calendar text-[11px]"></i>
+              <span>Per Bulan</span>
+            </button>
+
+            {/* Mode 2: Rentang Tanggal */}
+            <button
+              type="button"
+              onClick={() => setPeriodMode('rentang_tanggal')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+                periodMode === 'rentang_tanggal'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <i className="fa-solid fa-calendar-days text-[11px]"></i>
+              <span>Rentang Tanggal (Dari - Ke)</span>
+            </button>
+
+            {/* Mode 3: Per Semester */}
+            <button
+              type="button"
+              onClick={() => setPeriodMode('semester')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+                periodMode === 'semester'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <i className="fa-solid fa-graduation-cap text-[11px]"></i>
+              <span>Per Semester</span>
+            </button>
+          </div>
+
+          {/* Active Period Summary Badge */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700/60 flex items-center gap-1.5">
+              <i className="fa-regular fa-clock text-emerald-600 dark:text-emerald-400"></i>
+              <span>{effectivePeriodeLabel}</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Dynamic Controls Bar based on active periodMode */}
         <div className="p-4 sm:p-5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full lg:w-auto flex-1">
+          <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 gap-3 w-full lg:w-auto flex-1">
+            {/* Condition 1: Bulan Picker */}
+            {periodMode === 'bulanan' && (
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                  <i className="fa-regular fa-calendar text-emerald-600 dark:text-emerald-400"></i>
+                  <span>Pilih Bulan Rekap:</span>
+                </label>
+                <input
+                  type="month"
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+            )}
+
+            {/* Condition 2: Custom Date Range (Dari Tanggal & Sampai Tanggal) */}
+            {periodMode === 'rentang_tanggal' && (
+              <>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                    <i className="fa-regular fa-calendar-plus text-emerald-600 dark:text-emerald-400"></i>
+                    <span>Dari Tanggal:</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                    <i className="fa-regular fa-calendar-check text-emerald-600 dark:text-emerald-400"></i>
+                    <span>Sampai Tanggal:</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </>
+            )}
+
             {/* Semester Selector */}
             <div className="flex flex-col gap-1">
               <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
                 <i className="fa-solid fa-calendar-week text-emerald-600 dark:text-emerald-400"></i>
-                <span>Semester:</span>
+                <span>Semester e-Rapor:</span>
               </label>
               <select
                 value={semester}
@@ -432,73 +633,69 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
             </div>
           </div>
 
-          {/* Quick Date Range Customizer Toggle */}
+          {/* Action buttons on the right: Database status & JSON Export */}
           <div className="flex items-center gap-2 self-end lg:self-center">
-            <button
-              type="button"
-              onClick={() => setCustomRangeActive(!customRangeActive)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
-                customRangeActive
-                  ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
-                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              <i className="fa-solid fa-sliders text-[11px]"></i>
-              <span>{customRangeActive ? 'Rentang Tanggal Kustom Aktif' : 'Atur Tanggal Manual'}</span>
-            </button>
             <button
               type="button"
               onClick={handleFetchCloudRecords}
               disabled={isCheckingCloud}
               className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              title="Periksa dokumen rekap yang sudah tersimpan di Firestore"
+              title="Periksa data rekap dan profil siswa yang tersimpan di Firestore e-Rapor"
             >
               {isCheckingCloud ? (
                 <i className="fa-solid fa-circle-notch fa-spin text-emerald-500"></i>
               ) : (
                 <i className="fa-solid fa-database text-emerald-600 dark:text-emerald-400"></i>
               )}
-              <span>Cek Database</span>
+              <span>Cek Database e-Rapor</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDownloadJsonBackup}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Unduh seluruh rekap & data siswa dalam format JSON"
+            >
+              <i className="fa-solid fa-download text-indigo-500"></i>
+              <span>Unduh JSON</span>
             </button>
           </div>
         </div>
 
-        {/* Custom Date Range Panel */}
-        {customRangeActive && (
-          <div className="px-5 py-3 bg-emerald-50/60 dark:bg-emerald-950/20 border-b border-emerald-200 dark:border-emerald-900/40 flex flex-wrap items-center gap-3 text-xs">
-            <span className="font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1">
-              <i className="fa-regular fa-calendar-check"></i>
-              <span>Rentang Rekap Presensi:</span>
-            </span>
-            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 px-3 py-1 rounded-xl border border-emerald-300 dark:border-emerald-700">
-              <span className="text-slate-500">Dari:</span>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="bg-transparent font-bold text-slate-800 dark:text-slate-100 focus:outline-none"
-              />
-              <span className="text-slate-400">-</span>
-              <span className="text-slate-500">Sampai:</span>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="bg-transparent font-bold text-slate-800 dark:text-slate-100 focus:outline-none"
-              />
-            </div>
-            <span className="text-[11px] text-emerald-700 dark:text-emerald-400">
-              (Presensi Sakit, Izin, dan Alpa akan dihitung dari rentang tanggal ini)
+        {/* Dual Sync Guarantee Info Note */}
+        <div className="px-5 py-2.5 bg-teal-50/70 dark:bg-teal-950/20 border-b border-teal-200/60 dark:border-teal-900/40 flex items-center justify-between text-xs text-teal-900 dark:text-teal-200">
+          <div className="flex items-center gap-2">
+            <i className="fa-solid fa-arrows-split-up-and-left text-teal-600 dark:text-teal-400"></i>
+            <span>
+              <strong>Integrasi Otomatis Ganda:</strong> Mengirim rekap presensi ke{' '}
+              <code className="bg-teal-100 dark:bg-teal-900/60 px-1.5 py-0.5 rounded font-mono font-bold text-teal-800 dark:text-teal-300">
+                rekap_absensi_ogomojolo
+              </code>{' '}
+              dan data profil identitas siswa ke{' '}
+              <code className="bg-teal-100 dark:bg-teal-900/60 px-1.5 py-0.5 rounded font-mono font-bold text-teal-800 dark:text-teal-300">
+                data_siswa
+              </code>{' '}
+              serta{' '}
+              <code className="bg-teal-100 dark:bg-teal-900/60 px-1.5 py-0.5 rounded font-mono font-bold text-teal-800 dark:text-teal-300">
+                students
+              </code>{' '}
+              di e-Rapor iihh Beres.
             </span>
           </div>
-        )}
+          <span className="text-[11px] font-bold text-teal-700 dark:text-teal-400 whitespace-nowrap ml-3">
+            Rentang aktif: {effectiveStartDate} s.d. {effectiveEndDate}
+          </span>
+        </div>
 
-        {/* Sync Progress & Alert Messages */}
+        {/* Sync Progress Indicator */}
         {syncProgress && (
           <div className="px-5 py-2.5 bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 dark:border-emerald-800">
             <div className="flex items-center justify-between text-xs font-bold text-emerald-800 dark:text-emerald-300 mb-1">
-              <span>
-                Mengunggah data siswa ({syncProgress.current} / {syncProgress.total})...
+              <span className="flex items-center gap-2">
+                <i className="fa-solid fa-circle-notch fa-spin text-emerald-600"></i>
+                <span>
+                  Mengunggah rekap absensi & data siswa ({syncProgress.current} / {syncProgress.total})...
+                </span>
               </span>
               <span>{Math.round((syncProgress.current / syncProgress.total) * 100)}%</span>
             </div>
@@ -513,6 +710,7 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
           </div>
         )}
 
+        {/* Alerts: Success or Error */}
         {syncSuccessMessage && (
           <div className="px-5 py-3 bg-emerald-500/10 border-b border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs flex items-center justify-between">
             <div className="flex items-center gap-2 font-bold">
@@ -545,13 +743,16 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
 
         {/* Main Content: Table & Preview */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+          {/* Cloud Records History Drawer */}
           {showCloudHistory && cloudRecords && (
             <div className="mb-5 p-4 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <i className="fa-solid fa-database text-emerald-600 dark:text-emerald-400"></i>
                   <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                    Data di Firestore (`rekap_absensi_ogomojolo`): {cloudRecords.length} Dokumen
+                    Database e-Rapor (iihh Beres):{' '}
+                    <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">{cloudRecords.length} Rekap</span> &{' '}
+                    <span className="text-teal-600 dark:text-teal-400 font-extrabold">{cloudStudentCount} Data Siswa</span>
                   </h4>
                 </div>
                 <button
@@ -563,8 +764,7 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
               </div>
               {cloudRecords.length === 0 ? (
                 <p className="text-xs text-slate-500 italic">
-                  Belum ada dokumen yang tersimpan di koleksi `rekap_absensi_ogomojolo`. Silakan klik
-                  tombol &quot;Kirim Rekap ke e-Rapor&quot; untuk mengunggah.
+                  Belum ada dokumen yang tersimpan di koleksi `rekap_absensi_ogomojolo`. Silakan klik tombol &quot;Kirim Rekap & Data Siswa ke e-Rapor&quot; untuk mengunggah.
                 </p>
               ) : (
                 <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 text-xs">
@@ -574,8 +774,7 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
                         <th className="py-2 px-3">NISN</th>
                         <th className="py-2 px-3">Nama Murid</th>
                         <th className="py-2 px-2 text-center">Kelas</th>
-                        <th className="py-2 px-2 text-center">Sem</th>
-                        <th className="py-2 px-2 text-center">Tahun</th>
+                        <th className="py-2 px-2 text-center">Periode / Tgl</th>
                         <th className="py-2 px-2 text-center">Sakit</th>
                         <th className="py-2 px-2 text-center">Izin</th>
                         <th className="py-2 px-2 text-center">Alpa</th>
@@ -592,16 +791,17 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
                             {cr.namaSiswa}
                           </td>
                           <td className="py-1.5 px-2 text-center">{cr.kelas}</td>
-                          <td className="py-1.5 px-2 text-center">{cr.semester}</td>
-                          <td className="py-1.5 px-2 text-center">{cr.tahunAjaran}</td>
+                          <td className="py-1.5 px-2 text-center text-[10px] text-slate-600 dark:text-slate-400">
+                            {cr.periodeLabel || cr.bulan || `Sem ${cr.semester}`}
+                          </td>
                           <td className="py-1.5 px-2 text-center text-amber-600 font-bold">
-                            {cr.kehadiran?.sakit ?? 0}
+                            {cr.kehadiran?.sakit ?? cr.sakit ?? 0}
                           </td>
                           <td className="py-1.5 px-2 text-center text-sky-600 font-bold">
-                            {cr.kehadiran?.izin ?? 0}
+                            {cr.kehadiran?.izin ?? cr.izin ?? 0}
                           </td>
                           <td className="py-1.5 px-2 text-center text-rose-600 font-bold">
-                            {cr.kehadiran?.tanpaKeterangan ?? 0}
+                            {cr.kehadiran?.tanpaKeterangan ?? cr.tanpaKeterangan ?? 0}
                           </td>
                           <td className="py-1.5 px-3 text-[10px] text-slate-500">
                             {cr.updatedAt ? new Date(cr.updatedAt).toLocaleString('id-ID') : '-'}
@@ -626,16 +826,16 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
                 ):
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleDownloadJsonBackup}
-                className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
-                title="Unduh format JSON seluruh rekap"
-              >
-                <i className="fa-solid fa-file-code"></i>
-                <span>Unduh File JSON</span>
-              </button>
+            <div className="flex items-center gap-3 text-[11px] text-slate-500">
+              <span className="flex items-center gap-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span> S: Sakit
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-sky-500 inline-block"></span> I: Izin
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span> A: Alpa
+              </span>
             </div>
           </div>
 
@@ -668,7 +868,7 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
                   <th className="py-3 px-2 text-center min-w-[90px] bg-rose-500/10 text-rose-700 dark:text-rose-300 font-bold">
                     Tanpa Ket. (A)
                   </th>
-                  <th className="py-3 px-3 text-center min-w-[90px]">Pratinjau JSON</th>
+                  <th className="py-3 px-3 text-center min-w-[100px]">Pratinjau JSON</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 bg-white dark:bg-slate-900/60">
@@ -713,7 +913,14 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
 
                       {/* Nama Siswa */}
                       <td className="py-2.5 px-4 font-bold text-slate-900 dark:text-white">
-                        {recap.namaSiswa}
+                        <div className="flex flex-col">
+                          <span>{recap.namaSiswa}</span>
+                          {student?.gender && (
+                            <span className="text-[10px] text-slate-400 font-normal">
+                              {student.gender} {student.nis ? `• NIS: ${student.nis}` : ''}
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Kelas */}
@@ -781,7 +988,10 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
                       <td className="py-2.5 px-3 text-center">
                         <button
                           type="button"
-                          onClick={() => setPreviewRecap(recap)}
+                          onClick={() => {
+                            setPreviewRecap(recap);
+                            setPreviewTab('recap');
+                          }}
                           className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-all cursor-pointer flex items-center gap-1 mx-auto"
                         >
                           <i className="fa-solid fa-code text-[10px]"></i>
@@ -799,13 +1009,13 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
         {/* Modal Footer */}
         <div className="p-4 sm:p-5 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <i className="fa-solid fa-circle-info text-emerald-600 dark:text-emerald-400"></i>
+            <i className="fa-solid fa-shield-halved text-emerald-600 dark:text-emerald-400"></i>
             <span>
-              Koleksi tujuan:{' '}
+              Target Database:{' '}
               <strong className="text-slate-800 dark:text-slate-200 font-mono">
-                rekap_absensi_ogomojolo
+                ai-studio-iihhberes-db02674d-a027-43d4-b17e-50573c47075a
               </strong>{' '}
-              | Dokumen per siswa akan diperbarui secara otomatis.
+              | ID Dokumen: NISN Siswa.
             </span>
           </div>
 
@@ -832,22 +1042,22 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
               ) : (
                 <>
                   <i className="fa-solid fa-cloud-arrow-up"></i>
-                  <span>Kirim Rekap ke e-Rapor ({selectedStudentIds.size} Siswa)</span>
+                  <span>Kirim Rekap & Data Siswa ({selectedStudentIds.size} Siswa)</span>
                 </>
               )}
             </button>
           </div>
         </div>
 
-        {/* JSON Preview Submodal */}
+        {/* JSON Preview Submodal (with Tabs for Recap Doc & Student Profile Doc) */}
         {previewRecap && (
           <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-            <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-lg w-full p-5 text-white animate-in fade-in zoom-in-95 duration-150">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-xl w-full p-5 text-white animate-in fade-in zoom-in-95 duration-150">
               <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-2">
                 <div className="flex items-center gap-2">
                   <i className="fa-solid fa-file-code text-emerald-400"></i>
                   <h3 className="text-sm font-bold">
-                    Struktur Dokumen JSON (`rekap_absensi_ogomojolo`)
+                    Pratinjau JSON Dokumen e-Rapor
                   </h3>
                 </div>
                 <button
@@ -858,14 +1068,43 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
                 </button>
               </div>
 
+              {/* Submodal Tabs */}
+              <div className="flex items-center gap-2 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setPreviewTab('recap')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                    previewTab === 'recap'
+                      ? 'bg-emerald-600 text-white shadow'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  1. Rekap Kehadiran (`rekap_absensi_ogomojolo`)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewTab('student')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                    previewTab === 'student'
+                      ? 'bg-teal-600 text-white shadow'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  2. Data Profil Siswa (`data_siswa` / `students`)
+                </button>
+              </div>
+
               <p className="text-xs text-slate-400 mb-2">
-                Format dokumen untuk siswa:{' '}
-                <strong className="text-emerald-300">{previewRecap.namaSiswa}</strong> (NISN:{' '}
-                {previewRecap.nisn})
+                Siswa: <strong className="text-emerald-300">{previewRecap.namaSiswa}</strong> | NISN:{' '}
+                <strong className="text-teal-300">{previewRecap.nisn}</strong>
               </p>
 
               <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 font-mono text-xs overflow-x-auto text-emerald-300 max-h-72">
-                <pre>{JSON.stringify(previewRecap, null, 2)}</pre>
+                <pre>
+                  {previewTab === 'recap'
+                    ? JSON.stringify(previewRecap, null, 2)
+                    : JSON.stringify(previewStudentProfile, null, 2)}
+                </pre>
               </div>
 
               <div className="mt-4 flex items-center justify-between">
@@ -875,13 +1114,17 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
                       <i className="fa-solid fa-check"></i> JSON berhasil disalin!
                     </span>
                   ) : (
-                    'Sesuai dengan spesifikasi format e-Rapor Merdeka'
+                    'Sesuai dengan spesifikasi format e-Rapor Merdeka (iihh Beres)'
                   )}
                 </span>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => handleCopyJson(previewRecap)}
+                    onClick={() =>
+                      handleCopyJson(
+                        previewTab === 'recap' ? previewRecap : previewStudentProfile
+                      )
+                    }
                     className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white flex items-center gap-1.5 cursor-pointer"
                   >
                     <i className="fa-regular fa-copy"></i>
@@ -903,4 +1146,5 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
     </div>
   );
 };
+
 export default ERaporSyncModal;

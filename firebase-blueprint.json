@@ -140,6 +140,11 @@
           "type": "object",
           "description": "Total kehadiran semester (sakit, izin, tanpaKeterangan)"
         },
+        "tipePeriode": { "type": "string", "description": "Tipe periode rekap (semester, bulanan, rentang_tanggal)" },
+        "periodeLabel": { "type": "string", "description": "Label periode tanggal absensi" },
+        "tanggalMulai": { "type": "string", "description": "Tanggal awal rentang absensi (YYYY-MM-DD)" },
+        "tanggalSelesai": { "type": "string", "description": "Tanggal akhir rentang absensi (YYYY-MM-DD)" },
+        "bulan": { "type": "string", "description": "Bulan rekap jika bulanan (YYYY-MM)" },
         "updatedAt": { "type": "string", "description": "Waktu pembaruan ISO 8601 timestamp" }
       },
       "required": ["nisn", "namaSiswa", "kelas", "semester", "tahunAjaran", "kehadiran", "updatedAt"]
@@ -149,6 +154,10 @@
     "/students/{studentId}": {
       "schema": "Student",
       "description": "Koleksi data seluruh siswa sekolah dasar"
+    },
+    "/data_siswa/{studentId}": {
+      "schema": "Student",
+      "description": "Koleksi data siswa untuk integrasi e-Rapor Merdeka (iihh Beres)"
     },
     "/attendance/{recordId}": {
       "schema": "AttendanceRecord",

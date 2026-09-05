@@ -490,7 +490,7 @@ export function buildERaporPayload(recap: ERaporRecapDoc) {
   const izin = Number(recap.izin ?? recap.kehadiran?.izin) || 0;
   const tanpaKeterangan = Number(recap.tanpaKeterangan ?? recap.kehadiran?.tanpaKeterangan) || 0;
 
-  return sanitizeForFirestore({
+  const payload: Record<string, any> = {
     nisn: String(recap.nisn || '').trim(),
     namaSiswa: recap.namaSiswa,
     kelas: recap.kelas,
@@ -505,6 +505,45 @@ export function buildERaporPayload(recap: ERaporRecapDoc) {
       tanpaKeterangan,
     },
     updatedAt: recap.updatedAt || new Date().toISOString(),
+  };
+
+  if (recap.tipePeriode) payload.tipePeriode = recap.tipePeriode;
+  if (recap.periodeLabel) payload.periodeLabel = recap.periodeLabel;
+  if (recap.tanggalMulai) payload.tanggalMulai = recap.tanggalMulai;
+  if (recap.tanggalSelesai) payload.tanggalSelesai = recap.tanggalSelesai;
+  if (recap.bulan) payload.bulan = recap.bulan;
+
+  return sanitizeForFirestore(payload);
+}
+
+/**
+ * Builds student profile payload for syncing to e-Rapor (iihh Beres) database
+ * Populates bilingual & alternate fields (nama / namaSiswa / name, kelas / classRoom, etc.)
+ * so the e-Rapor app immediately recognizes all student fields.
+ */
+export function buildERaporStudentPayload(student: Partial<Student>, recap?: ERaporRecapDoc) {
+  const cleanNisn = String(recap?.nisn || student.nisn || student.nis || student.id || '').trim();
+  const namaSiswa = recap?.namaSiswa || student.name || 'Siswa';
+  const kelas = recap?.kelas || student.classRoom || 'Kelas 1';
+  const timestamp = new Date().toISOString();
+
+  return sanitizeForFirestore({
+    id: student.id || cleanNisn,
+    nis: student.nis || '',
+    nisn: cleanNisn,
+    name: namaSiswa,
+    nama: namaSiswa,
+    namaSiswa: namaSiswa,
+    classRoom: kelas,
+    kelas: kelas,
+    gender: student.gender || 'Laki-laki',
+    jenisKelamin: student.gender || 'Laki-laki',
+    parentPhone: student.parentPhone || '',
+    noHpOrtu: student.parentPhone || '',
+    avatarUrl: student.avatarUrl || '',
+    photo: student.photo || student.avatarUrl || '',
+    updatedAt: timestamp,
+    createdAt: student.createdAt || timestamp,
   });
 }
 
@@ -512,14 +551,26 @@ export function buildERaporPayload(recap: ERaporRecapDoc) {
  * Saves a single e-Rapor recap document to Firestore collection `rekap_absensi_ogomojolo`
  * Target database: ai-studio-iihhberes-db02674d-a027-43d4-b17e-50573c47075a (and local backup)
  */
-export async function saveERaporRecapToFirestore(recap: ERaporRecapDoc): Promise<void> {
+export async function saveERaporRecapToFirestore(recap: ERaporRecapDoc, student?: Student): Promise<void> {
   const docId = generateERaporDocId(recap.nisn, recap.semester, recap.tahunAjaran);
   const path = `${COLLECTIONS.REKAP_ABSENSI_OGOMOJOLO}/${docId}`;
   const payload = buildERaporPayload(recap);
+  const studentPayload = buildERaporStudentPayload(student || { id: docId, name: recap.namaSiswa, classRoom: recap.kelas }, recap);
 
   try {
     // Write directly to target e-Rapor database (iihh Beres)
     await setDoc(doc(iihhBeresDb, COLLECTIONS.REKAP_ABSENSI_OGOMOJOLO, docId), payload);
+
+    // Also write student data to iihh Beres so it appears in iih beres data siswa
+    try {
+      await setDoc(doc(iihhBeresDb, COLLECTIONS.STUDENTS, docId), studentPayload);
+      await setDoc(doc(iihhBeresDb, 'data_siswa', docId), studentPayload);
+      if (student?.id && student.id !== docId) {
+        await setDoc(doc(iihhBeresDb, COLLECTIONS.STUDENTS, student.id), studentPayload);
+      }
+    } catch (stdErr) {
+      console.warn('Note on syncing student profile to iihh Beres:', stdErr);
+    }
 
     // Also write to local app database as backup
     try {
@@ -534,18 +585,27 @@ export async function saveERaporRecapToFirestore(recap: ERaporRecapDoc): Promise
 
 /**
  * Bulk uploads student attendance recaps to Firestore collection `rekap_absensi_ogomojolo`
- * Writes to the target database `ai-studio-iihhberes-db02674d-a027-43d4-b17e-50573c47075a`
- * with ID dokumen = NISN siswa.
- * Also keeps a backup in the current app database.
+ * and ALSO syncs student identity records into iihh Beres student collections (`students` and `data_siswa`).
+ * Writes to the target database `ai-studio-iihhberes-db02674d-a027-43d4-b17e-50573c47075a`.
+ * Document ID = NISN siswa.
  */
 export async function batchSyncERaporRecapsToFirestore(
   recaps: ERaporRecapDoc[],
+  studentsList?: Student[],
   onProgress?: (current: number, total: number) => void
-): Promise<{ success: boolean; count: number; destinationDb: string }> {
-  if (recaps.length === 0) return { success: true, count: 0, destinationDb: IIHH_BERES_DATABASE_ID };
+): Promise<{ success: boolean; count: number; studentCount: number; destinationDb: string }> {
+  if (recaps.length === 0) return { success: true, count: 0, studentCount: 0, destinationDb: IIHH_BERES_DATABASE_ID };
   const path = COLLECTIONS.REKAP_ABSENSI_OGOMOJOLO;
   try {
-    const CHUNK_SIZE = 400;
+    // Use student lookup map for high performance
+    const studentMap = new Map<string, Student>();
+    studentsList?.forEach((s) => {
+      if (s.id) studentMap.set(s.id, s);
+      if (s.nis) studentMap.set(s.nis, s);
+      if (s.nisn) studentMap.set(s.nisn, s);
+    });
+
+    const CHUNK_SIZE = 150; // smaller chunks to account for writing both recap & student profile in batch
     let completedCount = 0;
     for (let i = 0; i < recaps.length; i += CHUNK_SIZE) {
       const chunk = recaps.slice(i, i + CHUNK_SIZE);
@@ -559,14 +619,35 @@ export async function batchSyncERaporRecapsToFirestore(
         const docId = generateERaporDocId(recap.nisn, recap.semester, recap.tahunAjaran);
         const payload = buildERaporPayload(recap);
 
-        const targetRef = doc(iihhBeresDb, COLLECTIONS.REKAP_ABSENSI_OGOMOJOLO, docId);
-        targetBatch.set(targetRef, payload);
+        // 1. Attendance Recap Doc to 'rekap_absensi_ogomojolo'
+        const targetRecapRef = doc(iihhBeresDb, COLLECTIONS.REKAP_ABSENSI_OGOMOJOLO, docId);
+        targetBatch.set(targetRecapRef, payload);
 
-        const localRef = doc(db, COLLECTIONS.REKAP_ABSENSI_OGOMOJOLO, docId);
-        localBatch.set(localRef, payload);
+        const localRecapRef = doc(db, COLLECTIONS.REKAP_ABSENSI_OGOMOJOLO, docId);
+        localBatch.set(localRecapRef, payload);
+
+        // 2. Student Data Doc into iihh Beres 'students' and 'data_siswa'
+        const matchedStudent = studentMap.get(recap.nisn) || studentMap.get(docId) || undefined;
+        const studentPayload = buildERaporStudentPayload(
+          matchedStudent || { id: docId, name: recap.namaSiswa, classRoom: recap.kelas },
+          recap
+        );
+
+        // Save by NISN doc ID
+        const targetStudentRef = doc(iihhBeresDb, COLLECTIONS.STUDENTS, docId);
+        targetBatch.set(targetStudentRef, studentPayload);
+
+        const targetDataSiswaRef = doc(iihhBeresDb, 'data_siswa', docId);
+        targetBatch.set(targetDataSiswaRef, studentPayload);
+
+        // Also save under student.id if different
+        if (matchedStudent?.id && matchedStudent.id !== docId) {
+          const targetStudentAltRef = doc(iihhBeresDb, COLLECTIONS.STUDENTS, matchedStudent.id);
+          targetBatch.set(targetStudentAltRef, studentPayload);
+        }
       }
 
-      // Commit to target database
+      // Commit to target database (iihh Beres)
       await targetBatch.commit();
 
       // Commit backup to local database silently
@@ -581,7 +662,7 @@ export async function batchSyncERaporRecapsToFirestore(
         onProgress(completedCount, recaps.length);
       }
     }
-    return { success: true, count: completedCount, destinationDb: IIHH_BERES_DATABASE_ID };
+    return { success: true, count: completedCount, studentCount: completedCount, destinationDb: IIHH_BERES_DATABASE_ID };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -603,6 +684,28 @@ export async function fetchERaporRecapsFromFirestore(): Promise<ERaporRecapDoc[]
     const list: ERaporRecapDoc[] = [];
     snap.forEach((docSnap) => {
       list.push(docSnap.data() as ERaporRecapDoc);
+    });
+    return list;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
+/**
+ * Fetches all student profiles stored in e-Rapor target database (iihh Beres)
+ */
+export async function fetchERaporStudentsFromFirestore(): Promise<any[]> {
+  const path = COLLECTIONS.STUDENTS;
+  try {
+    let snap;
+    try {
+      snap = await getDocs(collection(iihhBeresDb, path));
+    } catch {
+      snap = await getDocs(collection(db, path));
+    }
+    const list: any[] = [];
+    snap.forEach((docSnap) => {
+      list.push(docSnap.data());
     });
     return list;
   } catch (error) {

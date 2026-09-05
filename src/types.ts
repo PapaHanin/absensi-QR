@@ -125,6 +125,11 @@ export interface ERaporRecapDoc {
   tanpaKeterangan: number;
   kehadiran: ERaporKehadiran;
   updatedAt: string; // ISO_TIMESTAMP
+  tipePeriode?: 'semester' | 'bulanan' | 'rentang_tanggal';
+  periodeLabel?: string;
+  tanggalMulai?: string;
+  tanggalSelesai?: string;
+  bulan?: string;
 }
 
 
