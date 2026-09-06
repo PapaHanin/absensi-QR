@@ -527,6 +527,12 @@ export function buildERaporStudentPayload(student: Partial<Student>, recap?: ERa
   const kelas = recap?.kelas || student.classRoom || 'Kelas 1';
   const timestamp = new Date().toISOString();
 
+  // Extract class number and roman numerals for maximum compatibility with e-Rapor
+  const classNumMatch = kelas.match(/\d+/);
+  const classNumber = classNumMatch ? parseInt(classNumMatch[0], 10) : 1;
+  const romawiMap: Record<number, string> = { 1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V', 6: 'VI' };
+  const kelasRomawi = romawiMap[classNumber] || String(classNumber);
+
   return sanitizeForFirestore({
     id: student.id || cleanNisn,
     nis: student.nis || '',
@@ -536,6 +542,10 @@ export function buildERaporStudentPayload(student: Partial<Student>, recap?: ERa
     namaSiswa: namaSiswa,
     classRoom: kelas,
     kelas: kelas,
+    rombel: kelas,
+    tingkat: classNumber,
+    tingkatPendidikan: classNumber,
+    romawi: kelasRomawi,
     gender: student.gender || 'Laki-laki',
     jenisKelamin: student.gender || 'Laki-laki',
     parentPhone: student.parentPhone || '',
