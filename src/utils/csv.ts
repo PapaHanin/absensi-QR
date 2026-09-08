@@ -1,5 +1,5 @@
 import { AttendanceRecord, Student, SystemSettings, Teacher } from '../types';
-import { formatCleanNIP } from './classUtils';
+import { formatCleanNIP, resolveRecordTeacher } from './classUtils';
 
 export interface CSVAttendanceExportOptions {
   records: AttendanceRecord[];
@@ -7,6 +7,9 @@ export interface CSVAttendanceExportOptions {
   settings?: SystemSettings;
   selectedClass?: string;
   dateRangeLabel?: string;
+  teachers?: Teacher[];
+  students?: Student[];
+  currentTeacher?: Teacher | null;
   homeroomTeacher?: {
     name?: string;
     nip?: string;
@@ -31,6 +34,9 @@ export const exportAttendanceToCSV = (
   let settings: SystemSettings | undefined = undefined;
   let selectedClass = 'Semua';
   let dateRangeLabel = '';
+  let teachers: Teacher[] | undefined = undefined;
+  let students: Student[] | undefined = undefined;
+  let currentTeacher: Teacher | null | undefined = undefined;
   let homeroomTeacher: { name?: string; nip?: string; classLabel?: string } | undefined = undefined;
   let headmaster: { name?: string; nip?: string } | undefined = undefined;
   let signatureDate = '';
@@ -43,6 +49,9 @@ export const exportAttendanceToCSV = (
     settings = recordsOrOptions.settings;
     selectedClass = recordsOrOptions.selectedClass || 'Semua';
     dateRangeLabel = recordsOrOptions.dateRangeLabel || '';
+    teachers = recordsOrOptions.teachers;
+    students = recordsOrOptions.students;
+    currentTeacher = recordsOrOptions.currentTeacher;
     homeroomTeacher = recordsOrOptions.homeroomTeacher;
     headmaster = recordsOrOptions.headmaster;
     signatureDate = recordsOrOptions.signatureDate || '';
@@ -74,6 +83,7 @@ export const exportAttendanceToCSV = (
     'Nama Siswa',
     'Kelas',
     'Status Kehadiran',
+    'Guru Pengabsen',
     'Metode Absen',
     'Keterangan',
   ];
@@ -81,6 +91,15 @@ export const exportAttendanceToCSV = (
 
   // Data rows
   records.forEach((record, index) => {
+    const tInfo = resolveRecordTeacher(record, teachers, students, currentTeacher);
+    const roleTag =
+      tInfo.type === 'wali_kelas'
+        ? (tInfo.subject.startsWith('Wali') ? tInfo.subject : `Wali ${tInfo.subject}`)
+        : tInfo.type === 'guru_mapel'
+        ? (tInfo.subject.startsWith('Mapel') ? tInfo.subject : `Mapel: ${tInfo.subject}`)
+        : (tInfo.subject || 'Admin');
+    const teacherStr = `${tInfo.name} (${roleTag})`;
+
     const row = [
       index + 1,
       `"${record.date}"`,
@@ -89,6 +108,7 @@ export const exportAttendanceToCSV = (
       `"${record.studentName.replace(/"/g, '""')}"`,
       `"${record.classRoom}"`,
       `"${record.status}"`,
+      `"${teacherStr.replace(/"/g, '""')}"`,
       `"${record.scannedVia}"`,
       `"${(record.note || '').replace(/"/g, '""')}"`,
     ];

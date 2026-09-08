@@ -175,11 +175,68 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
     setSelectedStudentIds(new Set(filteredStudents.map((s) => s.id)));
   }, [selectedClass, filteredStudents]);
 
-  // Calculate attendance records per student for the active period window
-  const studentRecapList = useMemo<ERaporRecapDoc[]>(() => {
+  // Pre-index attendance records by student ID and NIS for O(1) instantaneous lookup.
+  // This turns a massive semester-long scan of ~15,000 records into a single pass,
+  // preventing browser UI freezes and making semester calculations instantaneous.
+  const attendanceLookup = useMemo(() => {
+    const map = new Map<string, { sakit: number; izin: number; alpa: number }>();
     const rangeStart = effectiveStartDate;
     const rangeEnd = effectiveEndDate;
 
+    for (let i = 0; i < attendanceRecords.length; i++) {
+      const att = attendanceRecords[i];
+      if (att.date && (att.date < rangeStart || att.date > rangeEnd)) continue;
+
+      const keys: string[] = [];
+      if (att.studentId) keys.push(att.studentId);
+      if (att.nis && att.nis !== att.studentId) keys.push(att.nis);
+
+      for (const k of keys) {
+        let entry = map.get(k);
+        if (!entry) {
+          entry = { sakit: 0, izin: 0, alpa: 0 };
+          map.set(k, entry);
+        }
+        if (att.status === 'Sakit') entry.sakit++;
+        else if (att.status === 'Izin') entry.izin++;
+        else if (att.status === 'Alpa') entry.alpa++;
+      }
+    }
+    return map;
+  }, [attendanceRecords, effectiveStartDate, effectiveEndDate]);
+
+  // Pre-index scheduled multi-day leaves by studentId
+  const leavesLookup = useMemo(() => {
+    const map = new Map<string, { sakit: number; izin: number }>();
+    const rangeStart = effectiveStartDate;
+    const rangeEnd = effectiveEndDate;
+
+    for (let i = 0; i < scheduledLeaves.length; i++) {
+      const leave = scheduledLeaves[i];
+      if (!leave.studentId || leave.status === 'Dibatalkan') continue;
+      if (leave.endDate < rangeStart || leave.startDate > rangeEnd) continue;
+
+      const lStart = new Date(leave.startDate > rangeStart ? leave.startDate : rangeStart);
+      const lEnd = new Date(leave.endDate < rangeEnd ? leave.endDate : rangeEnd);
+      const diffTime = Math.max(0, lEnd.getTime() - lStart.getTime());
+      const daysInLeave = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+
+      let entry = map.get(leave.studentId);
+      if (!entry) {
+        entry = { sakit: 0, izin: 0 };
+        map.set(leave.studentId, entry);
+      }
+      if (leave.type === 'Sakit') {
+        entry.sakit = Math.max(entry.sakit, daysInLeave);
+      } else if (leave.type === 'Izin' || leave.type === 'Dispensasi') {
+        entry.izin = Math.max(entry.izin, daysInLeave);
+      }
+    }
+    return map;
+  }, [scheduledLeaves, effectiveStartDate, effectiveEndDate]);
+
+  // Calculate attendance records per student for the active period window
+  const studentRecapList = useMemo<ERaporRecapDoc[]>(() => {
     return filteredStudents.map((student) => {
       // Find manual override if exists
       const override = manualOverrides[student.id];
@@ -192,39 +249,20 @@ export const ERaporSyncModal: React.FC<ERaporSyncModalProps> = ({
       const rawClass = student.classRoom || 'Kelas 1';
       const kelas = rawClass.toLowerCase().startsWith('kelas') ? rawClass : `Kelas ${rawClass}`;
 
-      // Calculate auto attendance in chosen date range
-      let autoSakit = 0;
-      let autoIzin = 0;
-      let autoAlpa = 0;
+      // Instant O(1) attendance lookup
+      const attData =
+        attendanceLookup.get(student.id) ||
+        (student.nis ? attendanceLookup.get(student.nis) : undefined);
+      let autoSakit = attData?.sakit || 0;
+      let autoIzin = attData?.izin || 0;
+      let autoAlpa = attData?.alpa || 0;
 
-      // Filter attendance records strictly within date window
-      attendanceRecords.forEach((att) => {
-        if (att.studentId === student.id || att.nis === student.nis) {
-          if (!att.date || (att.date >= rangeStart && att.date <= rangeEnd)) {
-            if (att.status === 'Sakit') autoSakit++;
-            else if (att.status === 'Izin') autoIzin++;
-            else if (att.status === 'Alpa') autoAlpa++;
-          }
-        }
-      });
-
-      // Account for scheduled multi-day leaves within the date range
-      scheduledLeaves.forEach((leave) => {
-        if (leave.studentId === student.id && leave.status !== 'Dibatalkan') {
-          if (leave.endDate >= rangeStart && leave.startDate <= rangeEnd) {
-            const lStart = new Date(leave.startDate > rangeStart ? leave.startDate : rangeStart);
-            const lEnd = new Date(leave.endDate < rangeEnd ? leave.endDate : rangeEnd);
-            const diffTime = Math.max(0, lEnd.getTime() - lStart.getTime());
-            const daysInLeave = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
-
-            if (leave.type === 'Sakit') {
-              if (daysInLeave > autoSakit) autoSakit = daysInLeave;
-            } else if (leave.type === 'Izin' || leave.type === 'Dispensasi') {
-              if (daysInLeave > autoIzin) autoIzin = daysInLeave;
-            }
-          }
-        }
-      });
+      // Check pre-calculated leave days
+      const leaveData = leavesLookup.get(student.id);
+      if (leaveData) {
+        if (leaveData.sakit > autoSakit) autoSakit = leaveData.sakit;
+        if (leaveData.izin > autoIzin) autoIzin = leaveData.izin;
+      }
 
       const rawSakit = override?.sakit !== undefined ? override.sakit : autoSakit;
       const rawIzin = override?.izin !== undefined ? override.izin : autoIzin;

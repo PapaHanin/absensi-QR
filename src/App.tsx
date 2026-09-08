@@ -56,6 +56,7 @@ import {
   seedInitialFirestoreDataIfEmpty,
 } from './services/firestoreService';
 import { safeSetItem, safeGetItem, safeRemoveItem, cleanStaleLocalStorage } from './utils/storage';
+import { isHomeroomClassMatch, resolveRecordTeacher } from './utils/classUtils';
 
 const LOCAL_STORAGE_KEYS = {
   STUDENTS: 'absensi_siswa_students_v2',
@@ -183,16 +184,18 @@ export default function App() {
     }
   });
 
-  // Currently logged-in Teacher (null by default for guest / shared sessions until login)
+  // Currently logged-in Teacher (defaults to admin MOH. FADLI if not explicitly logged in)
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(() => {
     try {
       const saved = safeGetItem(LOCAL_STORAGE_KEYS.CURRENT_TEACHER);
-      if (!saved) return null;
-      const parsed: Teacher = JSON.parse(saved);
-      return parsed && parsed.id ? parsed : null;
+      if (saved) {
+        const parsed: Teacher = JSON.parse(saved);
+        if (parsed && parsed.id) return parsed;
+      }
+      return INITIAL_TEACHERS[0] || null;
     } catch (e) {
       console.warn('Failed to parse current teacher from localStorage:', e);
-      return null;
+      return INITIAL_TEACHERS[0] || null;
     }
   });
 
@@ -346,7 +349,26 @@ export default function App() {
 
     const unsubAttendance = subscribeToAttendance((fsRecords) => {
       if (fsRecords && fsRecords.length > 0) {
-        setAttendanceRecords(fsRecords);
+        const enriched = fsRecords.map((r) => {
+          const raw = (r.teacherName || '').trim().toLowerCase();
+          if (
+            !r.teacherName ||
+            raw === 'petugas scanner' ||
+            raw === 'petugas sekolah' ||
+            raw === 'wali kelas / sistem' ||
+            raw === 'sistem'
+          ) {
+            const resolved = resolveRecordTeacher(r, teachers, students, currentTeacher);
+            return {
+              ...r,
+              teacherName: resolved.name,
+              teacherType: resolved.type,
+              teacherSubject: resolved.subject,
+            };
+          }
+          return r;
+        });
+        setAttendanceRecords(enriched);
       }
     });
 
@@ -515,6 +537,21 @@ export default function App() {
           ? `Terlambat (Masuk ${timeStr} WIB, Batas ${settings.lateCutoffTime})`
           : 'Hadir Tepat Waktu';
 
+      // Teacher tracking information - always assign real teacher, never generic fallback
+      const homeroom = teachers.find(
+        (t) => t.homeroomClass && isHomeroomClassMatch(student.classRoom, t.homeroomClass)
+      );
+      const assignedTeacher =
+        currentTeacher || homeroom || teachers.find((t) => t.role === 'admin') || teachers[0];
+
+      const teacherName = assignedTeacher?.name || 'MOH. FADLI';
+      const teacherRole = assignedTeacher?.role || 'guru';
+      const teacherType = assignedTeacher?.teacherType || (assignedTeacher?.homeroomClass ? 'wali_kelas' : 'admin');
+      const teacherSubject =
+        assignedTeacher?.teacherType === 'wali_kelas' || assignedTeacher?.homeroomClass
+          ? (assignedTeacher?.homeroomClass ? `Wali ${assignedTeacher.homeroomClass}` : 'Wali Kelas')
+          : assignedTeacher?.subject || (assignedTeacher?.role === 'admin' ? 'Administrator Sekolah' : 'Guru Pengabsen');
+
       const newRecord: AttendanceRecord = {
         id: `att-${Date.now()}`,
         studentId: student.id,
@@ -526,6 +563,11 @@ export default function App() {
         status,
         scannedVia,
         note,
+        teacherId: assignedTeacher?.id,
+        teacherName,
+        teacherRole,
+        teacherType,
+        teacherSubject,
       };
 
       setAttendanceRecords((prev) => [newRecord, ...prev]);
@@ -541,7 +583,7 @@ export default function App() {
 
       return { record: newRecord, isDuplicate: false };
     },
-    [attendanceRecords, settings.lateCutoffTime, addToast]
+    [attendanceRecords, settings.lateCutoffTime, addToast, currentTeacher, teachers]
   );
 
   // Add Manual Attendance
@@ -564,6 +606,21 @@ export default function App() {
         hour12: false,
       });
 
+    // Teacher tracking information - always assign real teacher
+    const homeroom = teachers.find(
+      (t) => t.homeroomClass && isHomeroomClassMatch(student.classRoom, t.homeroomClass)
+    );
+    const assignedTeacher =
+      currentTeacher || homeroom || teachers.find((t) => t.role === 'admin') || teachers[0];
+
+    const teacherName = assignedTeacher?.name || 'MOH. FADLI';
+    const teacherRole = assignedTeacher?.role || 'guru';
+    const teacherType = assignedTeacher?.teacherType || (assignedTeacher?.homeroomClass ? 'wali_kelas' : 'admin');
+    const teacherSubject =
+      assignedTeacher?.teacherType === 'wali_kelas' || assignedTeacher?.homeroomClass
+        ? (assignedTeacher?.homeroomClass ? `Wali ${assignedTeacher.homeroomClass}` : 'Wali Kelas')
+        : assignedTeacher?.subject || (assignedTeacher?.role === 'admin' ? 'Administrator Sekolah' : 'Guru Pengabsen');
+
     const newRecord: AttendanceRecord = {
       id: `att-manual-${Date.now()}`,
       studentId: student.id,
@@ -575,6 +632,11 @@ export default function App() {
       status,
       scannedVia: 'Manual Input',
       note: note || `Disimpan manual (${status})`,
+      teacherId: assignedTeacher?.id,
+      teacherName,
+      teacherRole,
+      teacherType,
+      teacherSubject,
     };
 
     setAttendanceRecords((prev) => [newRecord, ...prev]);
@@ -627,6 +689,19 @@ export default function App() {
               (r) => r.studentId === student.id && r.date === dStr
             );
             const status: AttendanceStatus = leave.type === 'Sakit' ? 'Sakit' : 'Izin';
+            const homeroom = teachers.find(
+              (t) => t.homeroomClass && isHomeroomClassMatch(student.classRoom, t.homeroomClass)
+            );
+            const assignedTeacher =
+              currentTeacher || homeroom || teachers.find((t) => t.role === 'admin') || teachers[0];
+            const teacherName = leave.recordedBy || assignedTeacher?.name || 'MOH. FADLI';
+            const teacherRole = assignedTeacher?.role || 'guru';
+            const teacherType = assignedTeacher?.teacherType || (assignedTeacher?.homeroomClass ? 'wali_kelas' : 'admin');
+            const teacherSubject =
+              assignedTeacher?.teacherType === 'wali_kelas' || assignedTeacher?.homeroomClass
+                ? (assignedTeacher?.homeroomClass ? `Wali ${assignedTeacher.homeroomClass}` : 'Wali Kelas')
+                : assignedTeacher?.subject || (assignedTeacher?.role === 'admin' ? 'Administrator Sekolah' : 'Guru Pengabsen');
+
             const attRecord: AttendanceRecord = {
               id: existingIdx >= 0 ? updated[existingIdx].id : `att-leave-${Date.now()}-${dStr}`,
               studentId: student.id,
@@ -638,6 +713,11 @@ export default function App() {
               status,
               scannedVia: 'Manual Input',
               note: `[Izin Terjadwal] ${leave.reason}`,
+              teacherId: assignedTeacher?.id,
+              teacherName,
+              teacherRole,
+              teacherType,
+              teacherSubject,
             };
 
             if (existingIdx >= 0) {
@@ -871,6 +951,12 @@ export default function App() {
                 students={students}
                 attendanceRecords={attendanceRecords}
                 settings={settings}
+                teachers={teachers}
+                currentTeacher={currentTeacher}
+                onSelectTeacher={(t) => {
+                  setCurrentTeacher(t);
+                  addToast('Guru Pengabsen Diubah', `Petugas pengabsen aktif: ${t.name}`, 'info');
+                }}
                 onRecordAttendance={handleRecordAttendance}
               />
             </ErrorBoundary>

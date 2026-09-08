@@ -4,7 +4,7 @@ import { exportAttendanceToCSV, exportMonthlyRecapToCSV } from '../utils/csv';
 import { openWhatsAppNotification } from '../utils/whatsapp';
 import { generateAttendancePDFReport, generateMonthlyAttendancePDFReport } from '../utils/pdf';
 import { AttendanceTrendChart } from './AttendanceTrendChart';
-import { isHomeroomClassMatch, formatClassLabel, findHomeroomTeacher } from '../utils/classUtils';
+import { isHomeroomClassMatch, formatClassLabel, findHomeroomTeacher, resolveRecordTeacher } from '../utils/classUtils';
 import { AutoAbsenteeModal } from './AutoAbsenteeModal';
 import { ScheduledLeaveModal } from './ScheduledLeaveModal';
 import { StudentBehaviorModal } from './StudentBehaviorModal';
@@ -61,6 +61,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     return 'Semua';
   });
   const [selectedStatus, setSelectedStatus] = useState<string>('Semua');
+  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState<string>('Semua');
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [exportAlertMessage, setExportAlertMessage] = useState<string | null>(null);
 
@@ -159,12 +160,48 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     return ['Semua', ...Array.from(setCls).sort()];
   }, [students]);
 
+  // Teacher Attendance Activity Monitoring
+  const teacherAttendanceActivity = useMemo(() => {
+    return teachers.map((tch) => {
+      const byTeacher = dateFilteredRecords.filter((r) => {
+        if (r.teacherId && r.teacherId === tch.id) return true;
+        const resolved = resolveRecordTeacher(r, teachers, students, currentTeacher);
+        if (resolved.name.toLowerCase().trim() === tch.name.toLowerCase().trim()) return true;
+        if (tch.teacherType === 'wali_kelas' && tch.homeroomClass && isHomeroomClassMatch(r.classRoom, tch.homeroomClass)) {
+          return true;
+        }
+        return false;
+      });
+
+      const count = byTeacher.length;
+      const classesSet = new Set(byTeacher.map((r) => r.classRoom));
+      const classesRecorded = Array.from(classesSet).sort();
+      const times = byTeacher.map((r) => r.time).filter(Boolean).sort();
+      const latestTime = times.length > 0 ? times[times.length - 1] : null;
+
+      return {
+        teacher: tch,
+        count,
+        classesRecorded,
+        latestTime,
+        isDone: count > 0,
+      };
+    });
+  }, [teachers, dateFilteredRecords, students, currentTeacher]);
+
+  const activeTeachersCount = useMemo(() => {
+    return teacherAttendanceActivity.filter((t) => t.isDone).length;
+  }, [teacherAttendanceActivity]);
+
   // Filtered list for the display table
   const filteredTableData = useMemo(() => {
     return dateFilteredRecords.filter((rec) => {
+      const resolved = resolveRecordTeacher(rec, teachers, students, currentTeacher);
       const matchSearch =
         rec.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        rec.nis.toLowerCase().includes(searchTerm.toLowerCase());
+        rec.nis.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        resolved.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (rec.teacherName && rec.teacherName.toLowerCase().includes(searchTerm.toLowerCase()));
 
       let matchClass = true;
       if (isWaliKelas && myHomeroom) {
@@ -174,9 +211,19 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       }
 
       const matchStatus = selectedStatus === 'Semua' || rec.status === selectedStatus;
-      return matchSearch && matchClass && matchStatus;
+
+      let matchTeacher = true;
+      if (selectedTeacherFilter !== 'Semua') {
+        const targetTeacher = teachers.find((t) => t.id === selectedTeacherFilter);
+        matchTeacher =
+          rec.teacherId === selectedTeacherFilter ||
+          resolved.name.toLowerCase().trim() === selectedTeacherFilter.toLowerCase().trim() ||
+          (targetTeacher && resolved.name.toLowerCase().trim() === targetTeacher.name.toLowerCase().trim());
+      }
+
+      return matchSearch && matchClass && matchStatus && matchTeacher;
     });
-  }, [dateFilteredRecords, searchTerm, isWaliKelas, myHomeroom, selectedClass, selectedStatus]);
+  }, [dateFilteredRecords, searchTerm, isWaliKelas, myHomeroom, selectedClass, selectedStatus, selectedTeacherFilter, teachers, students, currentTeacher]);
 
   // Per-Student Monthly Summary Breakdown: Hadir, Terlambat, Sakit, Izin, Alfa
   const monthlyStudentRecaps = useMemo(() => {
@@ -284,6 +331,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       settings,
       selectedClass,
       dateRangeLabel,
+      teachers,
+      students,
+      currentTeacher,
       homeroomTeacher: hrTeacher,
       headmaster: hm,
     });
@@ -712,6 +762,137 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         </div>
       </div>
 
+      {/* Teacher Attendance Activity Monitoring Card (Dewan Guru & Wali Kelas) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4 transition-colors">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-sm font-bold shadow-xs">
+                <i className="fa-solid fa-chalkboard-user"></i>
+              </div>
+              <h3 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                <span>Monitoring Guru yang Melakukan Absensi</span>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300">
+                  {activeTeachersCount} dari {teachers.length} Guru Aktif
+                </span>
+              </h3>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+              Pantau guru mana (wali kelas, guru mapel, atau admin) yang sudah/sedang mengabsen siswa pada periode <strong className="text-slate-700 dark:text-slate-300 font-semibold">{dateRangeLabel}</strong>.
+            </p>
+          </div>
+
+          {selectedTeacherFilter !== 'Semua' && (
+            <button
+              onClick={() => setSelectedTeacherFilter('Semua')}
+              className="self-start sm:self-auto text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-900 px-3 py-1.5 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            >
+              <i className="fa-solid fa-xmark text-xs"></i>
+              <span>Hapus Filter Guru</span>
+            </button>
+          )}
+        </div>
+
+        {/* Teacher Activity Cards Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {teacherAttendanceActivity.map((item) => {
+            const isSelected = selectedTeacherFilter === item.teacher.id;
+            const isDone = item.count > 0;
+
+            return (
+              <div
+                key={item.teacher.id}
+                className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
+                  isSelected
+                    ? 'bg-indigo-50/90 dark:bg-indigo-950/60 border-indigo-400 dark:border-indigo-600 ring-2 ring-indigo-400/40 shadow-xs'
+                    : isDone
+                    ? 'bg-slate-50/80 dark:bg-slate-800/40 border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700'
+                    : 'bg-white dark:bg-slate-900/60 border-slate-200/60 dark:border-slate-800/60 opacity-85 hover:opacity-100'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 ${
+                        isDone
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                      }`}
+                    >
+                      <i className={`fa-solid ${isDone ? 'fa-check' : 'fa-hourglass-start'}`}></i>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-xs text-slate-900 dark:text-slate-100 truncate">
+                        {item.teacher.name}
+                      </div>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <span
+                          className={`px-1.5 py-0.2 rounded text-[9px] font-extrabold ${
+                            item.teacher.teacherType === 'wali_kelas'
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                              : item.teacher.teacherType === 'guru_mapel'
+                              ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                              : 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300'
+                          }`}
+                        >
+                          {item.teacher.teacherType === 'wali_kelas'
+                            ? (item.teacher.homeroomClass ? `Wali ${item.teacher.homeroomClass}` : 'Wali Kelas')
+                            : item.teacher.teacherType === 'guru_mapel'
+                            ? `Mapel: ${item.teacher.subject}`
+                            : 'Admin Sekolah'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold shrink-0 ${
+                      isDone
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                        : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                    }`}
+                  >
+                    {isDone ? `${item.count} Siswa` : 'Belum Absen'}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] pt-2 border-t border-slate-100 dark:border-slate-800/80">
+                  <div className="text-slate-500 dark:text-slate-400 truncate pr-1">
+                    {isDone ? (
+                      <span>
+                        Terakhir: <strong className="text-slate-700 dark:text-slate-300 font-mono">{item.latestTime} WIB</strong>
+                        {item.classesRecorded.length > 0 && (
+                          <span className="ml-1 text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold">
+                            ({item.classesRecorded.join(', ')})
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="italic text-slate-400">Belum ada siswa diabsen</span>
+                    )}
+                  </div>
+
+                  {isDone ? (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTeacherFilter(isSelected ? 'Semua' : item.teacher.id)}
+                      className={`px-2.5 py-1 rounded-lg font-bold text-[10px] transition-all cursor-pointer flex items-center gap-1 shrink-0 ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200/80 dark:border-indigo-800'
+                      }`}
+                    >
+                      <i className={`fa-solid ${isSelected ? 'fa-check' : 'fa-filter'}`}></i>
+                      <span>{isSelected ? 'Tersaring' : 'Lihat Siswa'}</span>
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* 7-Day Attendance Trend Visualizer (Recharts) */}
       <AttendanceTrendChart
         students={students}
@@ -778,6 +959,24 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 <option value="Izin" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">Izin</option>
                 <option value="Sakit" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">Sakit</option>
                 <option value="Alpa" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">Alpa</option>
+              </select>
+            </div>
+
+            {/* Filter Guru Pengabsen */}
+            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs">
+              <i className="fa-solid fa-chalkboard-user text-indigo-600 dark:text-indigo-400 text-xs"></i>
+              <span className="font-semibold text-slate-500 dark:text-slate-400 hidden sm:inline">Guru:</span>
+              <select
+                value={selectedTeacherFilter}
+                onChange={(e) => setSelectedTeacherFilter(e.target.value)}
+                className="bg-transparent text-slate-800 dark:text-slate-100 font-bold focus:outline-none cursor-pointer max-w-[140px] truncate"
+              >
+                <option value="Semua" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">Semua Guru</option>
+                {teachers.map((tch) => (
+                  <option key={tch.id} value={tch.id} className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
+                    {tch.name} ({tch.teacherType === 'wali_kelas' ? (tch.homeroomClass ? `Wali ${tch.homeroomClass}` : 'Wali Kelas') : tch.teacherType === 'guru_mapel' ? `Mapel ${tch.subject}` : 'Admin'})
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -848,15 +1047,19 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 {selectedClass !== 'Semua' && (
                   <> (Kelas <span className="font-bold text-indigo-600 dark:text-indigo-400">{selectedClass}</span>)</>
                 )}
+                {selectedTeacherFilter !== 'Semua' && (
+                  <> (Oleh Guru: <span className="font-bold text-indigo-600 dark:text-indigo-400">{teachers.find((t) => t.id === selectedTeacherFilter)?.name || selectedTeacherFilter}</span>)</>
+                )}
               </>
             )}
           </span>
-          {(searchTerm || selectedClass !== 'Semua' || selectedStatus !== 'Semua') && (
+          {(searchTerm || selectedClass !== 'Semua' || selectedStatus !== 'Semua' || selectedTeacherFilter !== 'Semua') && (
             <button
               onClick={() => {
                 setSearchTerm('');
                 setSelectedClass('Semua');
                 setSelectedStatus('Semua');
+                setSelectedTeacherFilter('Semua');
               }}
               className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold text-xs flex items-center gap-1 cursor-pointer"
             >
@@ -1045,6 +1248,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   {filterMode !== 'daily' && <th className="py-3 px-4">Tanggal</th>}
                   <th className="py-3 px-4">Jam Masuk</th>
                   <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Guru Pengabsen</th>
                   <th className="py-3 px-4">Metode</th>
                   <th className="py-3 px-4">Keterangan</th>
                   <th className="py-3 px-4 text-right">Aksi</th>
@@ -1076,6 +1280,40 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                         )}
                         <td className="py-3 px-4 font-mono font-bold text-indigo-700 dark:text-indigo-400">{record.time} WIB</td>
                         <td className="py-3 px-4">{getStatusBadge(record.status)}</td>
+                        <td className="py-3 px-4">
+                          {(() => {
+                            const teacherInfo = resolveRecordTeacher(record, teachers, students, currentTeacher);
+                            return (
+                              <div className="flex flex-col">
+                                <span className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5 leading-tight">
+                                  <i className="fa-solid fa-chalkboard-user text-xs text-indigo-600 dark:text-indigo-400"></i>
+                                  <span>{teacherInfo.name}</span>
+                                </span>
+                                <div className="flex items-center gap-1 mt-0.5">
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold ${
+                                      teacherInfo.type === 'wali_kelas'
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300'
+                                        : teacherInfo.type === 'guru_mapel'
+                                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300'
+                                        : 'bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300'
+                                    }`}
+                                  >
+                                    {teacherInfo.type === 'wali_kelas'
+                                      ? teacherInfo.subject.startsWith('Wali')
+                                        ? teacherInfo.subject
+                                        : `Wali ${teacherInfo.subject}`
+                                      : teacherInfo.type === 'guru_mapel'
+                                      ? teacherInfo.subject.startsWith('Mapel')
+                                        ? teacherInfo.subject
+                                        : `Mapel: ${teacherInfo.subject}`
+                                      : teacherInfo.subject || 'Admin'}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </td>
                         <td className="py-3 px-4">
                           <span className="text-[11px] text-slate-600 dark:text-slate-400 flex items-center gap-1.5 font-medium">
                             <i
@@ -1132,7 +1370,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   })
                 ) : (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-slate-500">
+                    <td colSpan={filterMode !== 'daily' ? 10 : 9} className="py-12 text-center text-slate-500">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <i className="fa-solid fa-clipboard-question text-3xl text-slate-300"></i>
                         <p className="font-bold text-sm text-slate-700">Tidak ada data absensi ditemukan</p>
@@ -1164,9 +1402,25 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               <i className="fa-solid fa-pen-to-square text-indigo-600"></i>
               <span>Input Absensi Manual</span>
             </h3>
-            <p className="text-xs text-slate-500 mb-5">
+            <p className="text-xs text-slate-500 mb-3">
               Catat absensi siswa secara manual untuk kasus siswa tanpa kartu QR atau keterangan khusus.
             </p>
+
+            {currentTeacher && (
+              <div className="mb-4 p-2.5 rounded-xl bg-indigo-50 border border-indigo-200/80 flex items-center justify-between text-xs">
+                <span className="text-slate-700 flex items-center gap-1.5 font-medium">
+                  <i className="fa-solid fa-chalkboard-user text-indigo-600"></i>
+                  <span>Guru Pencatat: <strong className="text-slate-900">{currentTeacher.name}</strong></span>
+                </span>
+                <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-md">
+                  {currentTeacher.teacherType === 'wali_kelas'
+                    ? (currentTeacher.homeroomClass ? `Wali ${currentTeacher.homeroomClass}` : 'Wali Kelas')
+                    : currentTeacher.teacherType === 'guru_mapel'
+                    ? `Mapel ${currentTeacher.subject}`
+                    : 'Admin'}
+                </span>
+              </div>
+            )}
 
             <form onSubmit={handleSubmitManual} className="space-y-4">
               {/* Select Student */}

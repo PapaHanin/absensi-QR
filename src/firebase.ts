@@ -6,11 +6,21 @@ import {
   doc,
   getDocFromServer,
 } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+import firebaseConfigDefault from '../firebase-applet-config.json';
 
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+const activeFirebaseConfig = {
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseConfigDefault.projectId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseConfigDefault.appId,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfigDefault.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigDefault.authDomain,
+  firestoreDatabaseId: import.meta.env.VITE_FIRESTORE_DATABASE_ID || (firebaseConfigDefault as any).firestoreDatabaseId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || (firebaseConfigDefault as any).storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || (firebaseConfigDefault as any).messagingSenderId,
+};
 
-const databaseId = (firebaseConfig as any).firestoreDatabaseId || undefined;
+const app = getApps().length > 0 ? getApp() : initializeApp(activeFirebaseConfig);
+
+const databaseId = activeFirebaseConfig.firestoreDatabaseId || undefined;
 
 // Initialize Firestore with auto-detect long polling for robust cloud / iframe connectivity
 let firestoreInstance;

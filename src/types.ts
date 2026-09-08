@@ -26,6 +26,11 @@ export interface AttendanceRecord {
   status: AttendanceStatus;
   note?: string;
   scannedVia: 'QR Camera' | 'Manual Input' | 'Simulator';
+  teacherId?: string;
+  teacherName?: string;
+  teacherRole?: 'admin' | 'guru';
+  teacherType?: TeacherType;
+  teacherSubject?: string;
 }
 
 export interface SystemSettings {

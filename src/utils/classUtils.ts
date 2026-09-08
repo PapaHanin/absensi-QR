@@ -1,4 +1,4 @@
-import { Teacher } from '../types';
+import { AttendanceRecord, Student, Teacher } from '../types';
 
 /**
  * Utility functions for matching, filtering, and displaying SD school classes.
@@ -145,5 +145,92 @@ export function findHomeroomTeacher(
     nip: 'NIP. ............................',
     classLabel: `Wali Kelas ${formatClassLabel(targetClass)}`,
     isFound: false,
+  };
+}
+
+/**
+ * Resolves the actual teacher information for an attendance record.
+ * Never returns generic placeholders like "Petugas Scanner" or "Petugas Sekolah".
+ * Uses the recorded teacher if valid, or falls back to the student's Homeroom Teacher (Wali Kelas),
+ * the currently active teacher, or the School Admin.
+ */
+export function resolveRecordTeacher(
+  record: AttendanceRecord,
+  teachersList: Teacher[] | undefined,
+  studentsList: Student[] | undefined,
+  activeTeacher?: Teacher | null
+): { name: string; type: 'wali_kelas' | 'guru_mapel' | 'admin'; subject: string } {
+  // 1. If record already has a valid specific teacher name (not generic placeholder)
+  const rawName = (record.teacherName || '').trim();
+  const isGeneric =
+    !rawName ||
+    rawName.toLowerCase() === 'petugas scanner' ||
+    rawName.toLowerCase() === 'petugas sekolah' ||
+    rawName.toLowerCase() === 'wali kelas / sistem' ||
+    rawName.toLowerCase() === 'sistem' ||
+    rawName.toLowerCase() === 'petugas';
+
+  if (!isGeneric) {
+    return {
+      name: rawName,
+      type: record.teacherType || 'wali_kelas',
+      subject:
+        record.teacherSubject ||
+        (record.teacherType === 'wali_kelas' ? (record.classRoom ? `Wali ${record.classRoom}` : 'Wali Kelas') : 'Guru'),
+    };
+  }
+
+  // 2. Identify student's class
+  const student = studentsList?.find((s) => s.id === record.studentId || s.nis === record.nis);
+  const classRoom = record.classRoom || student?.classRoom || '';
+
+  // 3. Find homeroom teacher matching this class
+  const homeroom = teachersList?.find(
+    (t) => t.homeroomClass && isHomeroomClassMatch(classRoom, t.homeroomClass)
+  );
+
+  if (homeroom) {
+    return {
+      name: homeroom.name,
+      type: 'wali_kelas',
+      subject: formatClassLabel(classRoom),
+    };
+  }
+
+  // 4. Check if currently active teacher is present
+  if (activeTeacher?.name && activeTeacher.name.trim()) {
+    return {
+      name: activeTeacher.name,
+      type: activeTeacher.teacherType || (activeTeacher.role === 'admin' ? 'admin' : 'wali_kelas'),
+      subject: activeTeacher.homeroomClass
+        ? formatClassLabel(activeTeacher.homeroomClass)
+        : (activeTeacher.subject || (activeTeacher.role === 'admin' ? 'Admin Sekolah' : 'Guru Pengabsen')),
+    };
+  }
+
+  // 5. Check if there is an Admin teacher in the teachers list
+  const adminTeacher = teachersList?.find((t) => t.role === 'admin' || t.teacherType === 'admin');
+  if (adminTeacher?.name) {
+    return {
+      name: adminTeacher.name,
+      type: 'admin',
+      subject: adminTeacher.subject || 'Admin Sekolah',
+    };
+  }
+
+  // 6. First teacher in list
+  if (teachersList && teachersList.length > 0 && teachersList[0].name) {
+    return {
+      name: teachersList[0].name,
+      type: teachersList[0].teacherType || 'wali_kelas',
+      subject: teachersList[0].subject || (teachersList[0].homeroomClass ? formatClassLabel(teachersList[0].homeroomClass) : 'Wali Kelas'),
+    };
+  }
+
+  // 7. Ultimate fallback to school admin name (MOH. FADLI)
+  return {
+    name: 'MOH. FADLI',
+    type: 'admin',
+    subject: 'Administrator Sekolah',
   };
 }

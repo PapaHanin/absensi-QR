@@ -370,6 +370,21 @@ export const DapodikAnnouncementModal: React.FC<DapodikAnnouncementModalProps> =
                   </p>
                 </div>
               </div>
+
+              {/* Item 6 */}
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#340408] border border-slate-200/80 dark:border-[#540c12] flex items-start gap-3 hover:border-red-400/40 transition-colors">
+                <div className="w-8 h-8 rounded-lg bg-teal-100 dark:bg-[#06332d] text-teal-700 dark:text-teal-300 flex items-center justify-center text-xs shrink-0 font-bold">
+                  <i className="fa-solid fa-user-check"></i>
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-xs text-slate-900 dark:text-white">
+                    6. Transparansi & Identitas Guru Pengabsen
+                  </h4>
+                  <p className="text-[11px] text-slate-600 dark:text-rose-200/80 mt-0.5 leading-normal">
+                    Setiap absensi mencatat nama guru yang bertugas mengabsen (Wali Kelas / Guru Mapel / Admin) secara transparan pada tabel dashboard dan berkas ekspor laporan, tanpa label generik &apos;Petugas Scanner&apos;.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
 

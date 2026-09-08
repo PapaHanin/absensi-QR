@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Html5Qrcode, CameraDevice } from 'html5-qrcode';
-import { Student, AttendanceRecord, SystemSettings } from '../types';
+import { Student, AttendanceRecord, SystemSettings, Teacher } from '../types';
 import { parseQRPayload } from '../utils/qr';
 import { playScanBeep } from '../utils/audio';
 import { openWhatsAppNotification, copyWAMessageToClipboard } from '../utils/whatsapp';
@@ -9,6 +9,9 @@ interface ScannerTabProps {
   students: Student[];
   attendanceRecords: AttendanceRecord[];
   settings: SystemSettings;
+  teachers?: Teacher[];
+  currentTeacher?: Teacher | null;
+  onSelectTeacher?: (teacher: Teacher) => void;
   onRecordAttendance: (student: Student, scannedVia: 'QR Camera' | 'Manual Input' | 'Simulator') => {
     record: AttendanceRecord;
     isDuplicate: boolean;
@@ -18,6 +21,9 @@ interface ScannerTabProps {
 export const ScannerTab: React.FC<ScannerTabProps> = ({
   students,
   settings,
+  teachers = [],
+  currentTeacher,
+  onSelectTeacher,
   onRecordAttendance,
 }) => {
   const [cameras, setCameras] = useState<CameraDevice[]>([]);
@@ -377,6 +383,76 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
           </a>
         </div>
       </div>
+
+      {/* Active Teacher Banner */}
+      {(() => {
+        const activeT =
+          currentTeacher ||
+          teachers.find((t) => t.role === 'admin' || t.teacherType === 'admin') ||
+          teachers[0];
+        if (!activeT) return null;
+
+        return (
+          <div className="bg-linear-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/40 dark:to-blue-950/30 border border-indigo-200 dark:border-indigo-800/80 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-2xs">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-base font-bold shadow-xs shrink-0">
+                <i className="fa-solid fa-chalkboard-user"></i>
+              </div>
+              <div>
+                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 block leading-tight">
+                  Guru yang Sedang Bertugas Mengabsen:
+                </span>
+                <span className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2 flex-wrap mt-0.5">
+                  <span>{activeT.name}</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                      activeT.teacherType === 'wali_kelas'
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                        : activeT.teacherType === 'guru_mapel'
+                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                        : 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300'
+                    }`}
+                  >
+                    {activeT.teacherType === 'wali_kelas'
+                      ? activeT.homeroomClass
+                        ? `Wali ${activeT.homeroomClass}`
+                        : 'Wali Kelas'
+                      : activeT.teacherType === 'guru_mapel'
+                      ? `Guru Mapel: ${activeT.subject}`
+                      : 'Admin Sekolah'}
+                  </span>
+                </span>
+              </div>
+            </div>
+
+            {/* Quick Switch Teacher Selector */}
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              {teachers && teachers.length > 0 && onSelectTeacher && (
+                <div className="flex items-center gap-1.5 bg-white/90 dark:bg-slate-900/90 border border-indigo-200 dark:border-indigo-800 px-3 py-1.5 rounded-xl shadow-2xs">
+                  <label htmlFor="active-scanner-teacher-select" className="text-[11px] font-bold text-indigo-900 dark:text-indigo-200 whitespace-nowrap">
+                    Ganti Guru:
+                  </label>
+                  <select
+                    id="active-scanner-teacher-select"
+                    value={activeT.id}
+                    onChange={(e) => {
+                      const selected = teachers.find((t) => t.id === e.target.value);
+                      if (selected) onSelectTeacher(selected);
+                    }}
+                    className="text-xs font-bold text-slate-800 dark:text-slate-100 bg-transparent focus:outline-none cursor-pointer"
+                  >
+                    {teachers.map((t) => (
+                      <option key={t.id} value={t.id} className="text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-900">
+                        {t.name} ({t.teacherType === 'wali_kelas' ? (t.homeroomClass ? `Wali ${t.homeroomClass}` : 'Wali Kelas') : t.teacherType === 'guru_mapel' ? `Mapel ${t.subject || ''}` : 'Admin'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Interactive Scanner Area (2 Cols) */}
