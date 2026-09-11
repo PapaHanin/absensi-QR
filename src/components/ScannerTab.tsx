@@ -12,7 +12,11 @@ interface ScannerTabProps {
   teachers?: Teacher[];
   currentTeacher?: Teacher | null;
   onSelectTeacher?: (teacher: Teacher) => void;
-  onRecordAttendance: (student: Student, scannedVia: 'QR Camera' | 'Manual Input' | 'Simulator') => {
+  onRecordAttendance: (
+    student: Student,
+    scannedVia: 'QR Camera' | 'Manual Input' | 'Simulator',
+    scanningTeacher?: Teacher | null
+  ) => {
     record: AttendanceRecord;
     isDuplicate: boolean;
   };
@@ -95,11 +99,15 @@ export const ScannerTab: React.FC<ScannerTabProps> = ({
       }
 
       setScanError('');
-      const { record, isDuplicate } = onRecordAttendance(student, via);
+      const activeT =
+        currentTeacher ||
+        teachers.find((t) => t.role === 'admin' || t.teacherType === 'admin') ||
+        teachers[0];
+      const { record, isDuplicate } = onRecordAttendance(student, via, activeT);
       playScanBeep(!isDuplicate);
       setLastScanResult({ student, record, isDuplicate });
     },
-    [students, onRecordAttendance]
+    [students, onRecordAttendance, currentTeacher, teachers]
   );
 
   // Fetch camera devices silently without showing intrusive errors on load

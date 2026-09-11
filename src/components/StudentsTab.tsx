@@ -2,6 +2,8 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Student, Gender, SystemSettings, Teacher, ScheduledLeave, BehaviorLog } from '../types';
 import { StudentCardModal } from './StudentCardModal';
 import { BulkCardPrintModal } from './BulkCardPrintModal';
+import { CardTemplateSelectionModal } from './CardTemplateSelectionModal';
+import { CardTemplateId } from '../utils/studentCardTemplates';
 import { MALE_BW_AVATAR, FEMALE_BW_AVATAR, getDefaultAvatar } from '../utils/avatars';
 import { SD_CLASSES } from '../data/initialData';
 import { exportStudentsToCSV, downloadStudentImportTemplateCSV, parseStudentImportCSV } from '../utils/csv';
@@ -29,6 +31,7 @@ interface StudentsTabProps {
   onSaveBehaviorLog?: (log: BehaviorLog) => void;
   onDeleteBehaviorLog?: (logId: string) => void;
   onOpenERaporSync?: () => void;
+  onUpdateSettings?: (settings: SystemSettings) => void;
 }
 
 export const StudentsTab: React.FC<StudentsTabProps> = ({
@@ -48,6 +51,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
   onSaveBehaviorLog,
   onDeleteBehaviorLog,
   onOpenERaporSync,
+  onUpdateSettings,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'nis' | 'class'>('name');
@@ -114,15 +118,21 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [cardStudent, setCardStudent] = useState<Student | null>(null);
   const [isBulkPrintModalOpen, setIsBulkPrintModalOpen] = useState(false);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
 
-  // Form Fields (includes photo base64 string)
+  // Form Fields (includes photo base64 string, NISN, TTL, Address)
   const [isCompressingPhoto, setIsCompressingPhoto] = useState(false);
   const [formData, setFormData] = useState({
     nis: '',
+    nisn: '',
     name: '',
     classRoom: 'Kelas 1',
     gender: 'Laki-laki' as Gender,
+    birthPlace: 'Ogomojolo',
+    birthDate: '',
+    religion: 'Islam',
+    address: 'Desa Ogomojolo, Kec. Palasa',
     parentPhone: '',
     avatarUrl: MALE_BW_AVATAR,
     photo: undefined as string | undefined,
@@ -281,9 +291,14 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
     const initialClass = (isWaliKelas && myHomeroom) ? myHomeroom : (selectedClass !== 'Semua' ? selectedClass : 'Kelas 1');
     setFormData({
       nis: String(1000 + students.length + 1),
+      nisn: '',
       name: '',
       classRoom: initialClass,
       gender: 'Laki-laki',
+      birthPlace: 'Ogomojolo',
+      birthDate: '',
+      religion: 'Islam',
+      address: 'Desa Ogomojolo, Kec. Palasa',
       parentPhone: '',
       avatarUrl: MALE_BW_AVATAR,
       photo: undefined,
@@ -301,12 +316,29 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
       return;
     }
     setEditingStudent(student);
+
+    // Parse TTL if student only has ttl string
+    let bPlace = student.birthPlace || '';
+    let bDate = student.birthDate || '';
+    if (!bPlace && student.ttl && student.ttl.includes(',')) {
+      const parts = student.ttl.split(',');
+      bPlace = parts[0].trim();
+      bDate = parts.slice(1).join(',').trim();
+    } else if (!bPlace && student.ttl) {
+      bPlace = student.ttl;
+    }
+
     setFormData({
       nis: student.nis,
+      nisn: student.nisn || '',
       name: student.name,
-      classRoom: student.classRoom || '1-A',
+      classRoom: student.classRoom || (isWaliKelas && myHomeroom ? myHomeroom : 'Kelas 1'),
       gender: student.gender,
-      parentPhone: student.parentPhone,
+      birthPlace: bPlace || 'Ogomojolo',
+      birthDate: bDate || '',
+      religion: student.religion || 'Islam',
+      address: student.address || 'Desa Ogomojolo, Kec. Palasa',
+      parentPhone: student.parentPhone || '',
       avatarUrl: student.avatarUrl || getDefaultAvatar(student.gender),
       photo: student.photo,
     });
@@ -351,7 +383,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
 
     setIsParsingExcel(true);
     try {
-      const defaultClass = selectedClass !== 'Semua' ? selectedClass : 'Kelas 1';
+      const defaultClass = (isWaliKelas && myHomeroom) ? myHomeroom : (selectedClass !== 'Semua' ? selectedClass : 'Kelas 1');
       const { students: parsedStudents, errors, addedCount } = await parseStudentExcelFile(file, defaultClass, students);
 
       if (parsedStudents.length === 0) {
@@ -400,7 +432,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
     reader.onload = (event) => {
       const content = event.target?.result as string;
       if (content) {
-        const defaultClass = selectedClass !== 'Semua' ? selectedClass : 'Kelas 1';
+        const defaultClass = (isWaliKelas && myHomeroom) ? myHomeroom : (selectedClass !== 'Semua' ? selectedClass : 'Kelas 1');
         const { students: parsedStudents, errors } = parseStudentImportCSV(content, defaultClass, students);
 
         if (parsedStudents.length === 0) {
@@ -447,13 +479,20 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
       return;
     }
 
+    const payload = {
+      ...formData,
+      ttl: formData.birthPlace && formData.birthDate 
+        ? `${formData.birthPlace}, ${formData.birthDate}` 
+        : (formData.birthPlace || formData.birthDate || undefined),
+    };
+
     if (editingStudent) {
       onUpdateStudent({
         ...editingStudent,
-        ...formData,
+        ...payload,
       });
     } else {
-      onAddStudent(formData);
+      onAddStudent(payload);
     }
 
     setIsFormModalOpen(false);
@@ -501,7 +540,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
             <button
               onClick={() =>
                 downloadStudentImportTemplateExcel(
-                  isWaliKelas && myHomeroom ? myHomeroom : selectedClass !== 'Semua' ? selectedClass : '1-A'
+                  isWaliKelas && myHomeroom ? myHomeroom : selectedClass !== 'Semua' ? selectedClass : 'Kelas 1'
                 )
               }
               className="flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
@@ -544,6 +583,16 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
             <span>Cetak Kartu A4</span>
           </button>
 
+          {/* Tombol Pemilih 3 Desain Kartu CR80 Standar */}
+          <button
+            onClick={() => setIsTemplateModalOpen(true)}
+            className="flex items-center justify-center gap-1.5 px-3 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
+            title="Lihat & Pilih 3 Contoh Desain Kartu Siswa (Standar CR80: 85,60 × 53,98 mm)"
+          >
+            <i className="fa-solid fa-id-card-clip text-xs"></i>
+            <span>Pilih Desain Kartu</span>
+          </button>
+
           {/* Jurnal Karakter & Poin Siswa Shortcut Button */}
           {onSaveBehaviorLog && (
             <button
@@ -573,26 +622,6 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
               <span>Izin Terjadwal</span>
             </button>
           )}
-
-          {/* Export CSV Button (Available to all) */}
-          <button
-            onClick={() =>
-              exportStudentsToCSV(filteredStudents, undefined, {
-                settings,
-                selectedClass,
-                homeroomTeacher: findHomeroomTeacher(teachers, selectedClass, currentTeacher),
-                headmaster: {
-                  name: settings.headmasterName,
-                  nip: settings.headmasterNip,
-                },
-              })
-            }
-            className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold rounded-xl transition-all shadow-2xs cursor-pointer"
-            title="Unduh Data Siswa Saat Ini ke File (.csv)"
-          >
-            <i className="fa-solid fa-download text-slate-600 dark:text-slate-400 text-xs"></i>
-            <span>Ekspor CSV</span>
-          </button>
 
           {/* Kirim Rekap ke e-Rapor Button */}
           {onOpenERaporSync && (
@@ -902,8 +931,8 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
                   />
                 </th>
                 <th className="py-3 px-3">No</th>
-                <th className="py-3 px-4">Foto & Nama</th>
-                <th className="py-3 px-4">NIS</th>
+                <th className="py-3 px-4">Foto & Identitas Siswa</th>
+                <th className="py-3 px-4">NIS / NISN</th>
                 <th className="py-3 px-4">Kelas</th>
                 <th className="py-3 px-4">Gender</th>
                 <th className="py-3 px-4">Kontak Ortu</th>
@@ -940,17 +969,40 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
                           <img
                             src={displayPhoto}
                             alt={student.name}
-                            className="w-9 h-9 rounded-full object-cover ring-2 ring-indigo-500/20 bg-slate-100 dark:bg-slate-800"
+                            className="w-10 h-10 rounded-full object-cover ring-2 ring-indigo-500/20 bg-slate-100 dark:bg-slate-800 shrink-0"
                           />
                           <div>
                             <div className="font-bold text-slate-900 dark:text-white text-sm">{student.name}</div>
-                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                              Terdaftar: {student.createdAt}
+                            <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                              {(student.ttl || (student.birthPlace ? `${student.birthPlace}${student.birthDate ? `, ${student.birthDate}` : ''}` : '')) && (
+                                <span className="inline-flex items-center gap-1 font-medium bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-600 dark:text-slate-300">
+                                  <i className="fa-solid fa-cake-candles text-[9px] text-amber-500"></i>
+                                  {student.ttl || `${student.birthPlace}${student.birthDate ? `, ${student.birthDate}` : ''}`}
+                                </span>
+                              )}
+                              {student.address && (
+                                <span className="inline-flex items-center gap-1 font-medium text-slate-500 dark:text-slate-400 truncate max-w-[200px]" title={student.address}>
+                                  <i className="fa-solid fa-location-dot text-[9px] text-rose-500"></i>
+                                  {student.address}
+                                </span>
+                              )}
+                              {!student.ttl && !student.birthPlace && !student.address && (
+                                <span>Terdaftar: {student.createdAt}</span>
+                              )}
                             </div>
                           </div>
                         </div>
                       </td>
-                      <td className="py-3 px-4 font-mono font-bold text-amber-700 dark:text-amber-400">{student.nis}</td>
+                      <td className="py-3 px-4">
+                        <div className="font-mono font-bold text-amber-700 dark:text-amber-400">{student.nis}</div>
+                        {student.nisn ? (
+                          <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 mt-0.5">
+                            NISN: <span className="font-bold text-slate-700 dark:text-slate-300">{student.nisn}</span>
+                          </div>
+                        ) : (
+                          <div className="text-[9px] text-slate-400 italic mt-0.5">NISN: -</div>
+                        )}
+                      </td>
                       <td className="py-3 px-4 font-bold text-emerald-700 dark:text-emerald-400">
                         <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200/80 dark:border-emerald-800/60">
                           {student.classRoom}
@@ -1128,38 +1180,71 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
             )}
 
             <form onSubmit={handleSubmitForm} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* NIS */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    NIS <span className="text-rose-500">*</span>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    NIS (Nomor Induk Siswa) <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
+                    placeholder="Contoh: 1001"
                     value={formData.nis}
                     onChange={(e) => setFormData({ ...formData, nis: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono font-bold focus:outline-none focus:border-indigo-500 focus:bg-white"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white font-mono font-bold focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900"
+                  />
+                </div>
+
+                {/* NISN */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    NISN (Nomor Induk Siswa Nasional)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={10}
+                    placeholder="Contoh: 0081234567 (10 digit)"
+                    value={formData.nisn}
+                    onChange={(e) => setFormData({ ...formData, nisn: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white font-mono font-medium focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* Name */}
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Nama Lengkap Siswa <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Ahmad Fauzi"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white font-bold focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900 uppercase"
                   />
                 </div>
 
                 {/* Class Dropdown - SD Classes */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Kelas SD <span className="text-rose-500">*</span>
                   </label>
                   {isWaliKelas && myHomeroom ? (
-                    <div className="w-full bg-emerald-50 border border-emerald-300 rounded-xl px-3 py-2 text-xs text-emerald-900 font-bold flex items-center justify-between">
+                    <div className="w-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700 rounded-xl px-3 py-2 text-xs text-emerald-900 dark:text-emerald-300 font-bold flex items-center justify-between">
                       <span>{formatClassLabel(myHomeroom)}</span>
-                      <span className="text-[10px] bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded font-extrabold">
-                        Terkunci Wali Kelas
+                      <span className="text-[10px] bg-emerald-200 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 px-1.5 py-0.5 rounded font-extrabold">
+                        Kelas Binaan
                       </span>
                     </div>
                   ) : (
                     <select
                       value={formData.classRoom}
                       onChange={(e) => setFormData({ ...formData, classRoom: e.target.value })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-bold focus:outline-none focus:border-indigo-500 focus:bg-white cursor-pointer"
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white font-bold focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900 cursor-pointer"
                     >
                       {availableClasses.map((cls) => (
                         <option key={cls} value={cls}>
@@ -1171,26 +1256,38 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
                 </div>
               </div>
 
-              {/* Name */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Nama Lengkap Siswa <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Contoh: Ahmad Fauzi"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-semibold focus:outline-none focus:border-indigo-500 focus:bg-white"
-                />
+              {/* Tempat & Tanggal Lahir (TTL) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Tempat Lahir
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Ogomojolo / Palasa"
+                    value={formData.birthPlace}
+                    onChange={(e) => setFormData({ ...formData, birthPlace: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white font-medium focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Tanggal Lahir
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.birthDate}
+                    onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white font-medium focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900"
+                  />
+                </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* Gender */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Jenis Kelamin
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Jenis Kelamin <span className="text-rose-500">*</span>
                   </label>
                   <select
                     value={formData.gender}
@@ -1205,24 +1302,58 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
                             : prev.avatarUrl,
                       }));
                     }}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-medium focus:outline-none focus:border-indigo-500 focus:bg-white cursor-pointer"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white font-medium focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900 cursor-pointer"
                   >
                     <option value="Laki-laki">Laki-laki</option>
                     <option value="Perempuan">Perempuan</option>
                   </select>
                 </div>
 
-                {/* Parent Phone */}
+                {/* Religion */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    No. HP Orang Tua
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Agama
+                  </label>
+                  <select
+                    value={formData.religion}
+                    onChange={(e) => setFormData({ ...formData, religion: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white font-medium focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900 cursor-pointer"
+                  >
+                    <option value="Islam">Islam</option>
+                    <option value="Kristen Protestan">Kristen Protestan</option>
+                    <option value="Katolik">Katolik</option>
+                    <option value="Hindu">Hindu</option>
+                    <option value="Buddha">Buddha</option>
+                    <option value="Khonghucu">Khonghucu</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Alamat & Kontak Ortu */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Alamat Lengkap Siswa
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Dusun 1, Desa Ogomojolo, Kec. Palasa"
+                    value={formData.address}
+                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white font-medium focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    No. HP / WhatsApp Orang Tua
                   </label>
                   <input
                     type="text"
                     placeholder="081234567890"
                     value={formData.parentPhone}
                     onChange={(e) => setFormData({ ...formData, parentPhone: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono focus:outline-none focus:border-indigo-500 focus:bg-white"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white font-mono focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900"
                   />
                 </div>
               </div>
@@ -1347,6 +1478,13 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
         <StudentCardModal
           student={cardStudent}
           settings={settings}
+          onSaveDefaultTemplate={(templateId: CardTemplateId) => {
+            if (onUpdateSettings) {
+              onUpdateSettings({ ...settings, defaultCardTemplate: templateId });
+            } else {
+              localStorage.setItem('absensi_default_card_template', templateId);
+            }
+          }}
           onClose={() => setCardStudent(null)}
         />
       )}
@@ -1359,9 +1497,33 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
           currentTeacher={currentTeacher}
           initialClass={effectiveClass}
           initialSelectedIds={bulkPrintSelectedIds}
+          onSaveDefaultTemplate={(templateId: CardTemplateId) => {
+            if (onUpdateSettings) {
+              onUpdateSettings({ ...settings, defaultCardTemplate: templateId });
+            } else {
+              localStorage.setItem('absensi_default_card_template', templateId);
+            }
+          }}
           onClose={() => {
             setIsBulkPrintModalOpen(false);
             setBulkPrintSelectedIds(undefined);
+          }}
+        />
+      )}
+
+      {/* Modal Pemilihan 3 Contoh Desain Kartu Siswa (CR80) */}
+      {isTemplateModalOpen && (
+        <CardTemplateSelectionModal
+          settings={settings}
+          sampleStudents={students.slice(0, 3)}
+          onClose={() => setIsTemplateModalOpen(false)}
+          onSaveDefaultTemplate={(templateId: CardTemplateId) => {
+            if (onUpdateSettings) {
+              onUpdateSettings({ ...settings, defaultCardTemplate: templateId });
+            } else {
+              localStorage.setItem('absensi_default_card_template', templateId);
+            }
+            setIsTemplateModalOpen(false);
           }}
         />
       )}

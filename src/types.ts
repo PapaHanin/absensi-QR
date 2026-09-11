@@ -13,6 +13,11 @@ export interface Student {
   avatarUrl: string;
   photo?: string; // Base64 encoded string or image URL
   createdAt: string;
+  birthPlace?: string;
+  birthDate?: string;
+  ttl?: string;
+  address?: string;
+  religion?: string;
 }
 
 export interface AttendanceRecord {
@@ -40,12 +45,16 @@ export interface SystemSettings {
   academicYear: string;
   headmasterName?: string; // e.g. "Drs. H. Mulyadi, M.Pd"
   headmasterNip?: string; // e.g. "19680512 199403 1 005"
+  headmasterBarcodeUrl?: string; // e.g. Base64 or URL barcode tanda tangan kepala sekolah
   schoolCity?: string; // e.g. "Jakarta"
   announcementTitle?: string;
   announcementContent?: string;
   announcementVersion?: string;
   announcementDate?: string;
   announcementActive?: boolean;
+  defaultCardTemplate?: 'seraphic' | 'nusantara' | 'pelita';
+  cardValidityYear?: string;
+  cardProgramName?: string;
 }
 
 export interface QRPayload {

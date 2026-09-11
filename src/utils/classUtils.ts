@@ -160,7 +160,26 @@ export function resolveRecordTeacher(
   studentsList: Student[] | undefined,
   activeTeacher?: Teacher | null
 ): { name: string; type: 'wali_kelas' | 'guru_mapel' | 'admin'; subject: string } {
-  // 1. If record already has a valid specific teacher name (not generic placeholder)
+  // 1. Check by teacherId first! If teacherId matches any teacher in teachersList
+  if (record.teacherId && teachersList && teachersList.length > 0) {
+    const matched = teachersList.find((t) => t.id === record.teacherId);
+    if (matched) {
+      const type = matched.teacherType || (matched.role === 'admin' ? 'admin' : matched.homeroomClass ? 'wali_kelas' : 'guru_mapel');
+      const subject =
+        type === 'guru_mapel'
+          ? (matched.subject || record.teacherSubject || 'Guru Mapel')
+          : type === 'wali_kelas'
+          ? (matched.homeroomClass ? `Wali ${matched.homeroomClass}` : 'Wali Kelas')
+          : (matched.subject || 'Administrator Sekolah');
+      return {
+        name: matched.name,
+        type,
+        subject,
+      };
+    }
+  }
+
+  // 2. If record already has a valid specific teacher name (not generic placeholder)
   const rawName = (record.teacherName || '').trim();
   const isGeneric =
     !rawName ||
@@ -171,20 +190,72 @@ export function resolveRecordTeacher(
     rawName.toLowerCase() === 'petugas';
 
   if (!isGeneric) {
+    // Check if name matches any registered teacher
+    const matchedByName = teachersList?.find(
+      (t) => t.name.toLowerCase().trim() === rawName.toLowerCase().trim()
+    );
+    if (matchedByName) {
+      const type = matchedByName.teacherType || (matchedByName.role === 'admin' ? 'admin' : matchedByName.homeroomClass ? 'wali_kelas' : 'guru_mapel');
+      const subject =
+        type === 'guru_mapel'
+          ? (matchedByName.subject || record.teacherSubject || 'Guru Mapel')
+          : type === 'wali_kelas'
+          ? (matchedByName.homeroomClass ? `Wali ${matchedByName.homeroomClass}` : 'Wali Kelas')
+          : (matchedByName.subject || 'Administrator Sekolah');
+      return {
+        name: matchedByName.name,
+        type,
+        subject,
+      };
+    }
+
+    // Teacher not found by name in list, preserve the recorded type and subject accurately
+    const inferredType: 'wali_kelas' | 'guru_mapel' | 'admin' =
+      record.teacherType ||
+      (record.teacherRole === 'admin'
+        ? 'admin'
+        : record.teacherSubject && !record.teacherSubject.toLowerCase().includes('wali')
+        ? 'guru_mapel'
+        : 'wali_kelas');
+
+    let inferredSubject = record.teacherSubject;
+    if (!inferredSubject) {
+      if (inferredType === 'wali_kelas') {
+        inferredSubject = record.classRoom ? `Wali ${record.classRoom}` : 'Wali Kelas';
+      } else if (inferredType === 'guru_mapel') {
+        inferredSubject = 'Guru Mapel';
+      } else {
+        inferredSubject = 'Administrator Sekolah';
+      }
+    }
+
     return {
       name: rawName,
-      type: record.teacherType || 'wali_kelas',
-      subject:
-        record.teacherSubject ||
-        (record.teacherType === 'wali_kelas' ? (record.classRoom ? `Wali ${record.classRoom}` : 'Wali Kelas') : 'Guru'),
+      type: inferredType,
+      subject: inferredSubject,
     };
   }
 
-  // 2. Identify student's class
+  // 3. If currently active teacher is present (e.g. scanner or manual input currently operated by teacher)
+  if (activeTeacher?.name && activeTeacher.name.trim()) {
+    const type = activeTeacher.teacherType || (activeTeacher.role === 'admin' ? 'admin' : activeTeacher.homeroomClass ? 'wali_kelas' : 'guru_mapel');
+    return {
+      name: activeTeacher.name,
+      type,
+      subject:
+        type === 'guru_mapel'
+          ? (activeTeacher.subject || 'Guru Mapel')
+          : type === 'wali_kelas'
+          ? (activeTeacher.homeroomClass ? `Wali ${activeTeacher.homeroomClass}` : 'Wali Kelas')
+          : (activeTeacher.subject || 'Administrator Sekolah'),
+    };
+  }
+
+  // 4. Identify student's class
   const student = studentsList?.find((s) => s.id === record.studentId || s.nis === record.nis);
   const classRoom = record.classRoom || student?.classRoom || '';
 
-  // 3. Find homeroom teacher matching this class
+  // 5. Find homeroom teacher matching this class
   const homeroom = teachersList?.find(
     (t) => t.homeroomClass && isHomeroomClassMatch(classRoom, t.homeroomClass)
   );
@@ -197,18 +268,7 @@ export function resolveRecordTeacher(
     };
   }
 
-  // 4. Check if currently active teacher is present
-  if (activeTeacher?.name && activeTeacher.name.trim()) {
-    return {
-      name: activeTeacher.name,
-      type: activeTeacher.teacherType || (activeTeacher.role === 'admin' ? 'admin' : 'wali_kelas'),
-      subject: activeTeacher.homeroomClass
-        ? formatClassLabel(activeTeacher.homeroomClass)
-        : (activeTeacher.subject || (activeTeacher.role === 'admin' ? 'Admin Sekolah' : 'Guru Pengabsen')),
-    };
-  }
-
-  // 5. Check if there is an Admin teacher in the teachers list
+  // 6. Check if there is an Admin teacher in the teachers list
   const adminTeacher = teachersList?.find((t) => t.role === 'admin' || t.teacherType === 'admin');
   if (adminTeacher?.name) {
     return {
@@ -218,7 +278,7 @@ export function resolveRecordTeacher(
     };
   }
 
-  // 6. First teacher in list
+  // 7. First teacher in list
   if (teachersList && teachersList.length > 0 && teachersList[0].name) {
     return {
       name: teachersList[0].name,
@@ -227,7 +287,7 @@ export function resolveRecordTeacher(
     };
   }
 
-  // 7. Ultimate fallback to school admin name (MOH. FADLI)
+  // 8. Ultimate fallback to school admin name (MOH. FADLI)
   return {
     name: 'MOH. FADLI',
     type: 'admin',

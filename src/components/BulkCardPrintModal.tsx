@@ -3,11 +3,13 @@ import { Student, SystemSettings, Teacher } from '../types';
 import { createStudentQRPayload, generateQRCodeDataURL } from '../utils/qr';
 import { isHomeroomClassMatch } from '../utils/classUtils';
 import {
-  CardCustomizationOptions,
-  drawCustomizedCardPDF,
-} from '../utils/cardCustomization';
-import { CardCustomizationPanel } from './CardCustomizationPanel';
-import { StudentCardRenderer } from './StudentCardRenderer';
+  CardTemplateId,
+  CARD_TEMPLATES,
+  CR80_WIDTH_MM,
+  CR80_HEIGHT_MM,
+  drawCR80CardPDF,
+} from '../utils/studentCardTemplates';
+import { CR80StudentCard } from './CR80StudentCard';
 import jsPDF from 'jspdf';
 
 interface BulkCardPrintModalProps {
@@ -16,6 +18,7 @@ interface BulkCardPrintModalProps {
   currentTeacher: Teacher | null;
   initialClass?: string;
   initialSelectedIds?: string[];
+  onSaveDefaultTemplate?: (templateId: CardTemplateId) => void;
   onClose: () => void;
 }
 
@@ -25,11 +28,18 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
   currentTeacher,
   initialClass = 'Semua',
   initialSelectedIds,
+  onSaveDefaultTemplate,
   onClose,
 }) => {
   const isAdmin = currentTeacher?.role === 'admin' || currentTeacher?.teacherType === 'admin';
   const isWaliKelas = !isAdmin && (currentTeacher?.teacherType === 'wali_kelas' || Boolean(currentTeacher?.homeroomClass));
   const myHomeroom = currentTeacher?.homeroomClass;
+
+  // Selected Template (default from settings)
+  const [selectedTemplate, setSelectedTemplate] = useState<CardTemplateId>(() => {
+    return settings.defaultCardTemplate || 'seraphic';
+  });
+  const [toastMsg, setToastMsg] = useState<string>('');
 
   // Determine active class filter:
   // If Wali Kelas, strictly lock to their homeroom class
@@ -38,13 +48,6 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
       return myHomeroom;
     }
     return initialClass !== 'Semua' ? initialClass : 'Semua';
-  });
-
-  // Card Customization Options (Theme, Color, Font)
-  const [cardOptions, setCardOptions] = useState<CardCustomizationOptions>({
-    theme: 'wave',
-    color: 'blue',
-    font: 'sans',
   });
 
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(() => {
@@ -106,8 +109,8 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
       img.onload = () => {
         try {
           const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth || 160;
-          canvas.height = img.naturalHeight || 200;
+          canvas.width = img.naturalWidth || 180;
+          canvas.height = img.naturalHeight || 220;
           const ctx = canvas.getContext('2d');
           if (ctx) {
             ctx.drawImage(img, 0, 0);
@@ -124,75 +127,99 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
     });
   };
 
-  // Generate QR Code & Photo Data URLs for all students in the list
+  // Generate QR codes & load photos asynchronously for all visible students
   useEffect(() => {
-    let isMounted = true;
-    setIsGeneratingQR(true);
+    let isCancelled = false;
 
-    const generateAll = async () => {
-      const qMap: Record<string, string> = {};
-      const pMap: Record<string, string> = {};
+    const generateAssets = async () => {
+      setIsGeneratingQR(true);
+      const newQrMap: Record<string, string> = {};
+      const newPhotoMap: Record<string, string> = {};
 
+      const qrColor =
+        selectedTemplate === 'pelita'
+          ? '#0f172a'
+          : selectedTemplate === 'seraphic'
+          ? '#0b4a94'
+          : '#14532d';
+
+      // Process in small batches for responsive UI
       for (const student of classFilteredStudents) {
+        if (isCancelled) return;
+
+        // 1. QR Code
+        const payload = createStudentQRPayload(student);
         try {
-          const payload = createStudentQRPayload(student);
-          const dataUrl = await generateQRCodeDataURL(payload);
-          qMap[student.id] = dataUrl;
+          const qrUrl = await generateQRCodeDataURL(payload, qrColor);
+          newQrMap[student.id] = qrUrl;
         } catch (e) {
-          console.error('Error generating QR for student:', student.name, e);
+          console.error(`Error generating QR for student ${student.id}`, e);
         }
 
+        // 2. Photo
         const photoSrc = student.photo || student.avatarUrl;
         if (photoSrc) {
           try {
             const photoDataUrl = await loadPhotoAsDataUrl(photoSrc);
             if (photoDataUrl) {
-              pMap[student.id] = photoDataUrl;
+              newPhotoMap[student.id] = photoDataUrl;
             }
           } catch (e) {
-            console.warn('Error loading student photo for PDF:', student.name, e);
+            console.error(`Error loading photo for student ${student.id}`, e);
           }
         }
       }
 
-      if (isMounted) {
-        setQrMap(qMap);
-        setPhotoMap(pMap);
+      if (!isCancelled) {
+        setQrMap(newQrMap);
+        setPhotoMap(newPhotoMap);
         setIsGeneratingQR(false);
       }
     };
 
-    if (classFilteredStudents.length > 0) {
-      generateAll();
-    } else {
-      setIsGeneratingQR(false);
-    }
+    generateAssets();
 
     return () => {
-      isMounted = false;
+      isCancelled = true;
     };
-  }, [classFilteredStudents]);
+  }, [classFilteredStudents, selectedTemplate]);
 
+  // Toggle single student
   const toggleStudent = (id: string) => {
-    setSelectedStudentIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
+    const next = new Set(selectedStudentIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedStudentIds(next);
   };
 
+  // Select all in current filter
   const selectAll = () => {
-    setSelectedStudentIds(new Set(classFilteredStudents.map((s) => s.id)));
+    const next = new Set(selectedStudentIds);
+    classFilteredStudents.forEach((s) => next.add(s.id));
+    setSelectedStudentIds(next);
   };
 
+  // Deselect all in current filter
   const deselectAll = () => {
-    setSelectedStudentIds(new Set());
+    const next = new Set(selectedStudentIds);
+    classFilteredStudents.forEach((s) => next.delete(s.id));
+    setSelectedStudentIds(next);
   };
 
+  const handleSetDefault = () => {
+    if (onSaveDefaultTemplate) {
+      onSaveDefaultTemplate(selectedTemplate);
+    } else {
+      localStorage.setItem('absensi_default_card_template', selectedTemplate);
+    }
+    setToastMsg(`Template "${CARD_TEMPLATES[selectedTemplate].name}" disimpan sebagai default!`);
+    setTimeout(() => setToastMsg(''), 3000);
+  };
+
+  // List of students that will actually be printed
   const printableStudents = useMemo(() => {
     return classFilteredStudents.filter((s) => selectedStudentIds.has(s.id));
   }, [classFilteredStudents, selectedStudentIds]);
@@ -202,7 +229,7 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
     window.print();
   };
 
-  // Export to Vector PDF (8 Cards per A4 Page)
+  // Export to Vector PDF (CR80: 9 Cards per A4 Page in 3x3 layout)
   const handleExportPDF = async () => {
     if (printableStudents.length === 0) return;
     setIsExportingPDF(true);
@@ -214,14 +241,22 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
         format: 'a4',
       });
 
-      // 8 Cards per A4 Page Layout: 2 columns x 4 rows
-      const cardsPerPage = 8;
-      const cardWidth = 90;
-      const cardHeight = 62;
-      const marginX = 10;
-      const marginY = 12;
-      const gapX = 10;
-      const gapY = 8;
+      // 9 CR80 Cards per A4 Page Layout: 3 columns x 3 rows
+      const cardsPerPage = 9;
+      const cardWidth = CR80_WIDTH_MM; // 53.98 mm
+      const cardHeight = CR80_HEIGHT_MM; // 85.60 mm
+
+      // Spacing calculations:
+      // A4 = 210 x 297 mm
+      // 3 * 53.98 = 161.94 mm. Total horizontal margin = 48.06 mm.
+      // GapX = 6 mm. Left margin = (210 - (3 * 53.98 + 2 * 6)) / 2 = 18.03 mm
+      const gapX = 6;
+      const marginX = (210 - (3 * cardWidth + 2 * gapX)) / 2;
+
+      // 3 * 85.60 = 256.8 mm. Total vertical margin = 40.2 mm.
+      // GapY = 4.5 mm. Top margin = (297 - (3 * 85.60 + 2 * 4.5)) / 2 = 15.6 mm
+      const gapY = 4.5;
+      const marginY = (297 - (3 * cardHeight + 2 * gapY)) / 2;
 
       for (let i = 0; i < printableStudents.length; i++) {
         const student = printableStudents[i];
@@ -231,22 +266,23 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
           doc.addPage();
         }
 
-        const col = slotIndex % 2;
-        const row = Math.floor(slotIndex / 2);
+        const col = slotIndex % 3;
+        const row = Math.floor(slotIndex / 3);
         const x = marginX + col * (cardWidth + gapX);
         const y = marginY + row * (cardHeight + gapY);
 
-        drawCustomizedCardPDF(
+        drawCR80CardPDF(
           doc,
           x,
           y,
           cardWidth,
           cardHeight,
           student,
-          settings.schoolName,
+          settings,
           photoMap[student.id],
           qrMap[student.id],
-          cardOptions
+          selectedTemplate,
+          false
         );
 
         // Cutting Guideline Marks (Dashed light grey lines)
@@ -254,22 +290,22 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
         doc.setLineWidth(0.18);
         doc.setLineDashPattern([1.5, 2], 0);
 
-        // Vertical divider between column 0 and column 1
-        if (col === 0) {
-          const cutX = marginX + cardWidth + gapX / 2;
-          doc.line(cutX, y - 2, cutX, y + cardHeight + 2);
+        // Vertical divider between columns
+        if (col < 2) {
+          const cutX = x + cardWidth + gapX / 2;
+          doc.line(cutX, y - 1.5, cutX, y + cardHeight + 1.5);
         }
         // Horizontal divider between rows
-        if (row < 3) {
+        if (row < 2) {
           const cutY = y + cardHeight + gapY / 2;
-          doc.line(x - 2, cutY, x + cardWidth + 2, cutY);
+          doc.line(x - 1.5, cutY, x + cardWidth + 1.5, cutY);
         }
         doc.setLineDashPattern([], 0);
       }
 
       const safeClass = selectedClass.replace(/\s+/g, '_');
       const safeSchool = settings.schoolName.replace(/\s+/g, '_');
-      doc.save(`Kartu_Presensi_QR_${safeSchool}_Kelas_${safeClass}_8perA4.pdf`);
+      doc.save(`Kartu_Presensi_CR80_${safeSchool}_Kelas_${safeClass}_9perA4.pdf`);
     } catch (err) {
       console.error('Error generating PDF:', err);
       alert('Terjadi kesalahan saat mengekspor PDF kartu siswa.');
@@ -277,6 +313,8 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
       setIsExportingPDF(false);
     }
   };
+
+  const isCurrentDefault = (settings.defaultCardTemplate || 'seraphic') === selectedTemplate;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
@@ -290,8 +328,11 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white">
-                  Cetak Kartu QR Siswa (Format 8 Kartu per A4)
+                  Cetak Massal Kartu Siswa Standar CR80 (85,6 × 53,98 mm)
                 </h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                  9 Kartu / A4
+                </span>
                 {isWaliKelas && myHomeroom && (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                     Wali Kelas {myHomeroom}
@@ -299,7 +340,7 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
                 )}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Format standar 8 kartu per lembar A4. Pilih tema, warna, dan jenis tulisan sesuai identitas sekolah Anda.
+                Pilih desain kartu di bawah. Format standar CR80 memuat 9 kartu presisi pada 1 lembar A4 dengan garis potong.
               </p>
             </div>
           </div>
@@ -310,10 +351,10 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
               onClick={handleExportPDF}
               disabled={isGeneratingQR || isExportingPDF || printableStudents.length === 0}
               className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
-              title="Unduh File PDF A4 Siap Cetak (8 Kartu / Lembar)"
+              title="Unduh File PDF A4 Siap Cetak (9 Kartu CR80 / Lembar)"
             >
               <i className={`fa-solid ${isExportingPDF ? 'fa-spinner fa-spin' : 'fa-file-pdf'}`}></i>
-              <span>{isExportingPDF ? 'Membuat PDF...' : 'Unduh PDF (8/A4)'}</span>
+              <span>{isExportingPDF ? 'Membuat PDF...' : 'Unduh PDF (9/A4)'}</span>
             </button>
 
             <button
@@ -328,7 +369,7 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
 
             <button
               onClick={onClose}
-              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer ml-1"
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
               title="Tutup"
             >
               <i className="fa-solid fa-xmark text-lg"></i>
@@ -336,17 +377,88 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
           </div>
         </div>
 
-        {/* Customization Toolbar (Theme, Color, Font) */}
-        <CardCustomizationPanel
-          options={cardOptions}
-          onChange={setCardOptions}
-        />
+        {/* 3 Template Selection Bar */}
+        <div className="px-4 py-3 bg-slate-100 dark:bg-slate-850 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 no-print">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-bold text-slate-600 dark:text-slate-300 mr-1">
+              Desain Kartu:
+            </span>
+            {/* 1. Seraphic */}
+            <button
+              type="button"
+              onClick={() => setSelectedTemplate('seraphic')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                selectedTemplate === 'seraphic'
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <i className="fa-solid fa-graduation-cap" />
+              <span>1. Standar Nasional (Biru Kemdikbud)</span>
+            </button>
 
-        {/* Filters & Selection Controls (Non-Printable) */}
-        <div className="p-3 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs no-print">
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Class Selector */}
-            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5">
+            {/* 2. Nusantara */}
+            <button
+              type="button"
+              onClick={() => setSelectedTemplate('nusantara')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                selectedTemplate === 'nusantara'
+                  ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <i className="fa-solid fa-stamp" />
+              <span>2. Klasik Hijau Zamrud</span>
+            </button>
+
+            {/* 3. Pelita */}
+            <button
+              type="button"
+              onClick={() => setSelectedTemplate('pelita')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                selectedTemplate === 'pelita'
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <i className="fa-solid fa-id-badge" />
+              <span>3. Smart Card Kontemporer</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {isCurrentDefault ? (
+              <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                <i className="fa-solid fa-star text-amber-500" />
+                Template Default
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSetDefault}
+                className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-50 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                title="Jadikan desain ini default cetak sekolah"
+              >
+                <i className="fa-regular fa-star text-amber-500" />
+                <span>Jadikan Default</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Toast Notification */}
+        {toastMsg && (
+          <div className="bg-emerald-600 text-white px-4 py-1.5 text-xs font-bold flex items-center justify-center gap-2 animate-fade-in no-print">
+            <i className="fa-solid fa-circle-check" />
+            <span>{toastMsg}</span>
+          </div>
+        )}
+
+        {/* Sub-Header: Class Filter, Search, and Bulk Actions */}
+        <div className="p-3 sm:px-5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 no-print">
+          <div className="flex flex-wrap items-center gap-2.5 text-xs">
+            {/* Class Filter Dropdown */}
+            <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5">
               <i className="fa-solid fa-graduation-cap text-indigo-600 dark:text-indigo-400"></i>
               <span className="font-semibold text-slate-500 dark:text-slate-400">Kelas:</span>
               {isWaliKelas && myHomeroom ? (
@@ -371,10 +483,10 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
               )}
             </div>
 
-            {/* Locked Format Badge (8 Kartu / Lembar) */}
-            <div className="flex items-center gap-1.5 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 rounded-xl px-3 py-1.5 text-indigo-800 dark:text-indigo-300">
-              <i className="fa-solid fa-table-cells text-indigo-600 dark:text-indigo-400"></i>
-              <span className="font-bold">Format Lembar: 8 Kartu per A4 (Presisi 2x4)</span>
+            {/* Standard Format Badge */}
+            <div className="flex items-center gap-1.5 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 rounded-xl px-3 py-1.5 text-blue-800 dark:text-blue-300">
+              <i className="fa-solid fa-table-cells text-blue-600 dark:text-blue-400"></i>
+              <span className="font-bold">Format: 9 Kartu CR80 per A4 (Presisi 3×3)</span>
             </div>
 
             {/* Search filter within class */}
@@ -473,8 +585,8 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
                 }
               `}</style>
 
-              {/* Grid Layout of Cards: 2 Columns (8 cards per page with page-break) */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-5xl mx-auto">
+              {/* Grid Layout of Cards: 3 Columns for CR80 Standard */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto justify-items-center">
                 {printableStudents.map((student, idx) => {
                   const isChecked = selectedStudentIds.has(student.id);
                   const qrUrl = qrMap[student.id];
@@ -483,17 +595,19 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
                   return (
                     <div
                       key={student.id}
-                      className={(idx + 1) % 8 === 0 ? 'page-break' : ''}
+                      className={`card-item ${(idx + 1) % 9 === 0 ? 'page-break' : ''}`}
                     >
-                      <StudentCardRenderer
+                      <CR80StudentCard
+                        templateId={selectedTemplate}
                         student={student}
                         settings={settings}
-                        options={cardOptions}
                         qrUrl={qrUrl}
                         photoUrl={photoSrc}
                         isSelected={isChecked}
                         onToggleSelect={() => toggleStudent(student.id)}
                         showCheckbox={true}
+                        showLanyard={false}
+                        useSamplePromptData={false}
                       />
                     </div>
                   );

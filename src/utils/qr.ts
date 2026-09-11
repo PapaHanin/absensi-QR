@@ -17,14 +17,17 @@ export const createStudentQRPayload = (student: Student): string => {
 /**
  * Converts text or JSON string into Data URL image string for QR code
  */
-export const generateQRCodeDataURL = async (text: string): Promise<string> => {
+export const generateQRCodeDataURL = async (
+  text: string,
+  darkColor: string = '#0f172a'
+): Promise<string> => {
   try {
     const dataUrl = await QRCode.toDataURL(text, {
       errorCorrectionLevel: 'H',
       margin: 2,
       width: 300,
       color: {
-        dark: '#0f172a', // slate-900
+        dark: darkColor,
         light: '#ffffff'
       }
     });

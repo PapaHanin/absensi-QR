@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Teacher, SystemSettings } from '../types';
+import { HeadmasterBarcode, HEADMASTER_DEFAULT_BARCODE_DATA_URI } from '../utils/headmasterBarcode';
 
 interface AdminProfileModalProps {
   currentTeacher: Teacher;
@@ -30,6 +31,12 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({
   const [lateCutoffTime, setLateCutoffTime] = useState(settings.lateCutoffTime);
   const [headmasterName, setHeadmasterName] = useState(settings.headmasterName || 'Drs. H. Mulyadi, M.Pd');
   const [headmasterNip, setHeadmasterNip] = useState(settings.headmasterNip || '19680512 199403 1 005');
+  const [headmasterBarcodeUrl, setHeadmasterBarcodeUrl] = useState(settings.headmasterBarcodeUrl || '');
+  const [defaultCardTemplate, setDefaultCardTemplate] = useState<'seraphic' | 'nusantara' | 'pelita'>(
+    settings.defaultCardTemplate || 'seraphic'
+  );
+  const [cardValidityYear, setCardValidityYear] = useState(settings.cardValidityYear || '2026');
+  const [cardProgramName, setCardProgramName] = useState(settings.cardProgramName || 'REGULER');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,6 +61,10 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({
       lateCutoffTime,
       headmasterName: headmasterName.trim(),
       headmasterNip: headmasterNip.trim(),
+      headmasterBarcodeUrl: headmasterBarcodeUrl.trim(),
+      defaultCardTemplate,
+      cardValidityYear: cardValidityYear.trim() || '2026',
+      cardProgramName: cardProgramName.trim() || 'REGULER',
     });
 
     onClose();
@@ -252,6 +263,188 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({
                   placeholder="contoh: 19680512 199403 1 005"
                   value={headmasterNip}
                   onChange={(e) => setHeadmasterNip(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            {/* Barcode Tanda Tangan Elektronik (TTE) Kepala Sekolah */}
+            <div className="pt-2 border-t border-indigo-200/80">
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                Barcode Pengesahan / TTE Kepala Sekolah (Muncul di Kartu Siswa)
+              </label>
+              <div className="flex items-center gap-3 bg-white p-2.5 rounded-xl border border-indigo-200">
+                <div className="shrink-0 p-1 bg-slate-50 rounded-lg border border-slate-200">
+                  <HeadmasterBarcode
+                    customBarcodeUrl={headmasterBarcodeUrl}
+                    size={56}
+                  />
+                </div>
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  <p className="text-[11px] text-slate-600 font-medium leading-tight">
+                    {headmasterBarcodeUrl
+                      ? 'Menggunakan barcode kustom yang Anda unggah.'
+                      : 'Menggunakan barcode resmi SDN Kecil Ogomojolo.'}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="cursor-pointer inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition-colors shadow-2xs">
+                      <i className="fa-solid fa-upload"></i>
+                      <span>Ganti Barcode</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              if (typeof reader.result === 'string') {
+                                setHeadmasterBarcodeUrl(reader.result);
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                    </label>
+                    {headmasterBarcodeUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setHeadmasterBarcodeUrl('')}
+                        className="cursor-pointer inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition-colors"
+                      >
+                        <i className="fa-solid fa-rotate-left"></i>
+                        <span>Reset ke Default SDN Kecil Ogomojolo</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 4: Pilihan Desain Kartu Siswa CR80 (85,60 x 53,98 mm) */}
+          <div className="bg-blue-50/70 border border-blue-200 p-4 rounded-2xl space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-black text-blue-950 uppercase tracking-wider flex items-center gap-1.5">
+                <i className="fa-solid fa-id-card-clip text-blue-700"></i>
+                <span>Desain Kartu Siswa Default (Standar CR80: 85,60 × 53,98 mm)</span>
+              </h4>
+              <span className="text-[10px] font-black bg-blue-200/80 text-blue-900 px-2 py-0.5 rounded-full">
+                ISO ID-1
+              </span>
+            </div>
+
+            <p className="text-[11px] text-slate-600">
+              Pilih salah satu dari 3 desain kartu berikut sebagai template bawaan saat mencetak kartu presisi QR untuk siswa.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {/* Option 1: Seraphic */}
+              <label
+                className={`p-3 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
+                  defaultCardTemplate === 'seraphic'
+                    ? 'bg-white border-blue-600 ring-2 ring-blue-500/20 shadow-xs'
+                    : 'bg-white/60 border-slate-200 hover:border-blue-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-3.5 h-3.5 rounded-full bg-blue-800" />
+                    <span className="text-xs font-black text-slate-900">Seraphic Modern</span>
+                  </div>
+                  <input
+                    type="radio"
+                    name="cardTemplate"
+                    value="seraphic"
+                    checked={defaultCardTemplate === 'seraphic'}
+                    onChange={() => setDefaultCardTemplate('seraphic')}
+                    className="accent-blue-600"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-500 leading-tight">
+                  Biru Samudra & Emas Elegan, Logo Perisai SA, Kurva Ombak Modern.
+                </p>
+              </label>
+
+              {/* Option 2: Nusantara */}
+              <label
+                className={`p-3 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
+                  defaultCardTemplate === 'nusantara'
+                    ? 'bg-white border-emerald-600 ring-2 ring-emerald-500/20 shadow-xs'
+                    : 'bg-white/60 border-slate-200 hover:border-emerald-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-3.5 h-3.5 rounded-full bg-emerald-800" />
+                    <span className="text-xs font-black text-slate-900">Nusantara Klasik</span>
+                  </div>
+                  <input
+                    type="radio"
+                    name="cardTemplate"
+                    value="nusantara"
+                    checked={defaultCardTemplate === 'nusantara'}
+                    onChange={() => setDefaultCardTemplate('nusantara')}
+                    className="accent-emerald-600"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-500 leading-tight">
+                  Hijau Zamrud & Krem Hangat, Tanda Tangan Kepala Sekolah Resmi.
+                </p>
+              </label>
+
+              {/* Option 3: Pelita */}
+              <label
+                className={`p-3 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
+                  defaultCardTemplate === 'pelita'
+                    ? 'bg-white border-orange-500 ring-2 ring-orange-500/20 shadow-xs'
+                    : 'bg-white/60 border-slate-200 hover:border-orange-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-3.5 h-3.5 rounded-full bg-orange-600" />
+                    <span className="text-xs font-black text-slate-900">Pelita Kontemporer</span>
+                  </div>
+                  <input
+                    type="radio"
+                    name="cardTemplate"
+                    value="pelita"
+                    checked={defaultCardTemplate === 'pelita'}
+                    onChange={() => setDefaultCardTemplate('pelita')}
+                    className="accent-orange-600"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-500 leading-tight">
+                  Teal & Oranye Dinamis, Logo Burung, Akses Perpustakaan & Bar Valid.
+                </p>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Masa Berlaku Kartu (Teks di Bawah)
+                </label>
+                <input
+                  type="text"
+                  placeholder="contoh: 2026 atau Juni 2025"
+                  value={cardValidityYear}
+                  onChange={(e) => setCardValidityYear(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Label Program / Jurusan Kartu (Opsional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="contoh: REGULER / BILINGUAL IPA"
+                  value={cardProgramName}
+                  onChange={(e) => setCardProgramName(e.target.value)}
                   className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-indigo-500"
                 />
               </div>

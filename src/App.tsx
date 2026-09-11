@@ -505,7 +505,8 @@ export default function App() {
   const handleRecordAttendance = useCallback(
     (
       student: Student,
-      scannedVia: 'QR Camera' | 'Manual Input' | 'Simulator'
+      scannedVia: 'QR Camera' | 'Manual Input' | 'Simulator',
+      assignedTeacherOverride?: Teacher | null
     ): { record: AttendanceRecord; isDuplicate: boolean } => {
       const currentDate = getTodayDateString();
       const now = new Date();
@@ -537,20 +538,32 @@ export default function App() {
           ? `Terlambat (Masuk ${timeStr} WIB, Batas ${settings.lateCutoffTime})`
           : 'Hadir Tepat Waktu';
 
-      // Teacher tracking information - always assign real teacher, never generic fallback
+      // Teacher tracking information - faithfully preserving Guru Mapel / Wali Kelas
       const homeroom = teachers.find(
         (t) => t.homeroomClass && isHomeroomClassMatch(student.classRoom, t.homeroomClass)
       );
       const assignedTeacher =
-        currentTeacher || homeroom || teachers.find((t) => t.role === 'admin') || teachers[0];
+        assignedTeacherOverride ||
+        currentTeacher ||
+        homeroom ||
+        teachers.find((t) => t.role === 'admin') ||
+        teachers[0];
 
       const teacherName = assignedTeacher?.name || 'MOH. FADLI';
       const teacherRole = assignedTeacher?.role || 'guru';
-      const teacherType = assignedTeacher?.teacherType || (assignedTeacher?.homeroomClass ? 'wali_kelas' : 'admin');
+      const teacherType =
+        assignedTeacher?.teacherType ||
+        (assignedTeacher?.role === 'admin'
+          ? 'admin'
+          : assignedTeacher?.homeroomClass
+          ? 'wali_kelas'
+          : 'guru_mapel');
       const teacherSubject =
-        assignedTeacher?.teacherType === 'wali_kelas' || assignedTeacher?.homeroomClass
+        teacherType === 'wali_kelas'
           ? (assignedTeacher?.homeroomClass ? `Wali ${assignedTeacher.homeroomClass}` : 'Wali Kelas')
-          : assignedTeacher?.subject || (assignedTeacher?.role === 'admin' ? 'Administrator Sekolah' : 'Guru Pengabsen');
+          : teacherType === 'guru_mapel'
+          ? (assignedTeacher?.subject ? `Mapel ${assignedTeacher.subject}` : 'Guru Mapel')
+          : 'Administrator Sekolah';
 
       const newRecord: AttendanceRecord = {
         id: `att-${Date.now()}`,
@@ -586,12 +599,14 @@ export default function App() {
     [attendanceRecords, settings.lateCutoffTime, addToast, currentTeacher, teachers]
   );
 
-  // Add Manual Attendance
+  // Add Manual Attendance (supports any date or past date)
   const handleAddManualAttendance = (
     studentId: string,
     status: AttendanceStatus,
     note?: string,
-    customTime?: string
+    customTime?: string,
+    customDate?: string,
+    teacherOverride?: Teacher | null
   ) => {
     const student = students.find((s) => s.id === studentId);
     if (!student) return;
@@ -605,21 +620,34 @@ export default function App() {
         second: '2-digit',
         hour12: false,
       });
+    const targetDate = customDate || selectedDate;
 
     // Teacher tracking information - always assign real teacher
     const homeroom = teachers.find(
       (t) => t.homeroomClass && isHomeroomClassMatch(student.classRoom, t.homeroomClass)
     );
     const assignedTeacher =
-      currentTeacher || homeroom || teachers.find((t) => t.role === 'admin') || teachers[0];
+      teacherOverride ||
+      currentTeacher ||
+      homeroom ||
+      teachers.find((t) => t.role === 'admin') ||
+      teachers[0];
 
     const teacherName = assignedTeacher?.name || 'MOH. FADLI';
     const teacherRole = assignedTeacher?.role || 'guru';
-    const teacherType = assignedTeacher?.teacherType || (assignedTeacher?.homeroomClass ? 'wali_kelas' : 'admin');
+    const teacherType =
+      assignedTeacher?.teacherType ||
+      (assignedTeacher?.role === 'admin'
+        ? 'admin'
+        : assignedTeacher?.homeroomClass
+        ? 'wali_kelas'
+        : 'guru_mapel');
     const teacherSubject =
-      assignedTeacher?.teacherType === 'wali_kelas' || assignedTeacher?.homeroomClass
+      teacherType === 'wali_kelas'
         ? (assignedTeacher?.homeroomClass ? `Wali ${assignedTeacher.homeroomClass}` : 'Wali Kelas')
-        : assignedTeacher?.subject || (assignedTeacher?.role === 'admin' ? 'Administrator Sekolah' : 'Guru Pengabsen');
+        : teacherType === 'guru_mapel'
+        ? (assignedTeacher?.subject ? `Mapel ${assignedTeacher.subject}` : 'Guru Mapel')
+        : 'Administrator Sekolah';
 
     const newRecord: AttendanceRecord = {
       id: `att-manual-${Date.now()}`,
@@ -627,7 +655,7 @@ export default function App() {
       nis: student.nis,
       studentName: student.name,
       classRoom: student.classRoom,
-      date: selectedDate,
+      date: targetDate,
       time: timeStr,
       status,
       scannedVia: 'Manual Input',
@@ -643,7 +671,22 @@ export default function App() {
     saveAttendanceToFirestore(newRecord).catch((err) =>
       console.warn('Failed to save manual attendance to Firestore:', err)
     );
-    addToast('Absensi Manual Saved', `Absensi manual ${student.name} (${status}) berhasil dicatat.`, 'success');
+    addToast('Absensi Manual Tersimpan', `Absensi manual ${student.name} (${targetDate} - ${status}) berhasil dicatat.`, 'success');
+  };
+
+  // Update / Edit Existing Attendance Record (Koreksi Absensi Lampau)
+  const handleUpdateAttendanceRecord = (updatedRecord: AttendanceRecord) => {
+    setAttendanceRecords((prev) =>
+      prev.map((r) => (r.id === updatedRecord.id ? updatedRecord : r))
+    );
+    saveAttendanceToFirestore(updatedRecord).catch((err) =>
+      console.warn('Failed to update attendance in Firestore:', err)
+    );
+    addToast(
+      'Absensi Diperbarui',
+      `Data absensi ${updatedRecord.studentName} (${updatedRecord.date} - ${updatedRecord.status}) berhasil diperbarui.`,
+      'success'
+    );
   };
 
   // Delete Attendance Record
@@ -935,6 +978,7 @@ export default function App() {
                 teachers={teachers}
                 currentTeacher={currentTeacher}
                 onAddManualAttendance={handleAddManualAttendance}
+                onUpdateRecord={handleUpdateAttendanceRecord}
                 onDeleteRecord={handleDeleteRecord}
                 onSaveLeave={handleSaveLeave}
                 onDeleteLeave={handleDeleteLeave}
@@ -981,6 +1025,7 @@ export default function App() {
                 onSaveBehaviorLog={handleSaveBehaviorLog}
                 onDeleteBehaviorLog={handleDeleteBehaviorLog}
                 onOpenERaporSync={() => setIsERaporSyncModalOpen(true)}
+                onUpdateSettings={handleUpdateSettings}
               />
             </ErrorBoundary>
           )}

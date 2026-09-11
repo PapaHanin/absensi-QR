@@ -3,29 +3,44 @@ import { Student } from '../types';
 
 /**
  * Downloads a true Excel (.xlsx) template for bulk student import
- * Headers: NIS, Nama, Kelas, No HP Orang Tua
+ * Headers: NIS, NISN, Nama, Kelas, Jenis Kelamin, Tempat Lahir, Tanggal Lahir, Agama, Alamat, No HP Orang Tua
  */
 export const downloadStudentImportTemplateExcel = (className: string = 'Kelas 1') => {
   const templateData = [
     {
       'NIS': '1001',
+      'NISN': '0081234561',
       'Nama': 'Ahmad Fauzi',
       'Kelas': className,
       'Jenis Kelamin': 'Laki-laki',
+      'Tempat Lahir': 'Ogomojolo',
+      'Tanggal Lahir': '2014-08-12',
+      'Agama': 'Islam',
+      'Alamat': 'Desa Ogomojolo, Kec. Palasa',
       'No HP Orang Tua': '081234567890',
     },
     {
       'NIS': '1002',
+      'NISN': '0081234562',
       'Nama': 'Anisa Rahmawati',
       'Kelas': className,
       'Jenis Kelamin': 'Perempuan',
+      'Tempat Lahir': 'Palasa',
+      'Tanggal Lahir': '2014-05-14',
+      'Agama': 'Islam',
+      'Alamat': 'Desa Ogomojolo, Kec. Palasa',
       'No HP Orang Tua': '081234567891',
     },
     {
       'NIS': '1003',
+      'NISN': '0081234563',
       'Nama': 'Budi Santoso',
       'Kelas': className,
       'Jenis Kelamin': 'Laki-laki',
+      'Tempat Lahir': 'Parigi',
+      'Tanggal Lahir': '2014-11-20',
+      'Agama': 'Islam',
+      'Alamat': 'Desa Ogomojolo, Kec. Palasa',
       'No HP Orang Tua': '081234567892',
     },
   ];
@@ -34,11 +49,16 @@ export const downloadStudentImportTemplateExcel = (className: string = 'Kelas 1'
 
   // Set column widths
   worksheet['!cols'] = [
-    { wch: 15 }, // NIS
+    { wch: 12 }, // NIS
+    { wch: 15 }, // NISN
     { wch: 28 }, // Nama
     { wch: 12 }, // Kelas
-    { wch: 16 }, // Jenis Kelamin
-    { wch: 20 }, // No HP Orang Tua
+    { wch: 15 }, // Jenis Kelamin
+    { wch: 16 }, // Tempat Lahir
+    { wch: 14 }, // Tanggal Lahir
+    { wch: 12 }, // Agama
+    { wch: 30 }, // Alamat
+    { wch: 18 }, // No HP Orang Tua
   ];
 
   const workbook = XLSX.utils.book_new();
@@ -59,7 +79,7 @@ export const downloadStudentImportTemplateExcel = (className: string = 'Kelas 1'
 
 /**
  * Reads and parses an uploaded Excel file (.xls, .xlsx, .csv) and extracts student records.
- * Validates columns: NIS, Nama, Kelas, No HP Orang Tua
+ * Validates columns: NIS, NISN, Nama, Kelas, Jenis Kelamin, Tempat Lahir, Tanggal Lahir, Agama, Alamat, No HP
  */
 export const parseStudentExcelFile = async (
   file: File,
@@ -96,20 +116,24 @@ export const parseStudentExcelFile = async (
         const headerRow = (rows[0] as any[]).map((col) => String(col).trim().toLowerCase());
 
         // Validate or map column positions
-        let nisIdx = headerRow.findIndex((c) => c.includes('nis'));
+        let nisIdx = headerRow.findIndex((c) => c === 'nis' || (c.includes('nis') && !c.includes('nisn')));
+        let nisnIdx = headerRow.findIndex((c) => c.includes('nisn'));
         let nameIdx = headerRow.findIndex((c) => c.includes('nama'));
         let classIdx = headerRow.findIndex((c) => c.includes('kelas'));
         let genderIdx = headerRow.findIndex((c) => c.includes('kelamin') || c.includes('gender') || c.includes('jk'));
+        let birthPlaceIdx = headerRow.findIndex((c) => c.includes('tempat') || c.includes('tmp_lahir'));
+        let birthDateIdx = headerRow.findIndex((c) => c.includes('tanggal') || c.includes('tgl_lahir') || c.includes('lahir'));
+        let ttlIdx = headerRow.findIndex((c) => c === 'ttl' || c.includes('tempat tanggal lahir'));
+        let religionIdx = headerRow.findIndex((c) => c.includes('agama'));
+        let addressIdx = headerRow.findIndex((c) => c.includes('alamat') || c.includes('domisili') || c.includes('tempat tinggal'));
         let phoneIdx = headerRow.findIndex(
           (c) => c.includes('hp') || c.includes('phone') || c.includes('ortu') || c.includes('telepon') || c.includes('wa')
         );
 
-        // Fallbacks if headers are missing or in default order: NIS (0), Nama (1), Kelas (2), No HP Ortu (3/4)
+        // Fallbacks
         if (nisIdx === -1) nisIdx = 0;
         if (nameIdx === -1) nameIdx = 1;
         if (classIdx === -1) classIdx = 2;
-        if (genderIdx === -1) genderIdx = 3;
-        if (phoneIdx === -1) phoneIdx = headerRow.length >= 5 ? 4 : 3;
 
         const MALE_AVATAR = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80';
         const FEMALE_AVATAR = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80';
@@ -123,10 +147,27 @@ export const parseStudentExcelFile = async (
           if (!row || row.length === 0) continue;
 
           const rawNis = String(row[nisIdx] ?? '').trim();
+          const rawNisn = nisnIdx >= 0 ? String(row[nisnIdx] ?? '').trim() : '';
           const rawName = String(row[nameIdx] ?? '').trim();
-          const rawClass = String(row[classIdx] ?? '').trim() || defaultClass || '1-A';
-          let rawGender = String(row[genderIdx] ?? '').trim();
-          const rawPhone = String(row[phoneIdx] ?? '').trim();
+          const rawClass = classIdx >= 0 ? String(row[classIdx] ?? '').trim() || defaultClass || 'Kelas 1' : defaultClass;
+          let rawGender = genderIdx >= 0 ? String(row[genderIdx] ?? '').trim() : 'Laki-laki';
+          const rawPhone = phoneIdx >= 0 ? String(row[phoneIdx] ?? '').trim() : '';
+          let rawBirthPlace = birthPlaceIdx >= 0 ? String(row[birthPlaceIdx] ?? '').trim() : '';
+          let rawBirthDate = birthDateIdx >= 0 ? String(row[birthDateIdx] ?? '').trim() : '';
+          const rawReligion = religionIdx >= 0 ? String(row[religionIdx] ?? '').trim() || 'Islam' : 'Islam';
+          const rawAddress = addressIdx >= 0 ? String(row[addressIdx] ?? '').trim() || 'Desa Ogomojolo, Kec. Palasa' : 'Desa Ogomojolo, Kec. Palasa';
+
+          // Check if TTL combined column is present
+          if (ttlIdx >= 0 && (!rawBirthPlace || !rawBirthDate)) {
+            const ttlVal = String(row[ttlIdx] ?? '').trim();
+            if (ttlVal.includes(',')) {
+              const parts = ttlVal.split(',');
+              if (!rawBirthPlace) rawBirthPlace = parts[0].trim();
+              if (!rawBirthDate) rawBirthDate = parts.slice(1).join(',').trim();
+            } else if (!rawBirthPlace) {
+              rawBirthPlace = ttlVal;
+            }
+          }
 
           // Skip completely empty rows
           if (!rawNis && !rawName) continue;
@@ -143,7 +184,7 @@ export const parseStudentExcelFile = async (
 
           const gLower = rawGender.toLowerCase();
           let gender: 'Laki-laki' | 'Perempuan' = 'Laki-laki';
-          if (gLower.includes('p') || gLower.includes('female') || gLower.includes('wanita')) {
+          if (gLower.includes('p') || gLower.includes('female') || gLower.includes('wanita') || gLower === 'pr') {
             gender = 'Perempuan';
           }
 
@@ -152,9 +193,15 @@ export const parseStudentExcelFile = async (
           const newStudent: Student = {
             id: uniqueId,
             nis: rawNis,
+            nisn: rawNisn || undefined,
             name: rawName,
             classRoom: rawClass,
             gender: gender,
+            birthPlace: rawBirthPlace || 'Ogomojolo',
+            birthDate: rawBirthDate || undefined,
+            ttl: rawBirthPlace && rawBirthDate ? `${rawBirthPlace}, ${rawBirthDate}` : rawBirthPlace || undefined,
+            religion: rawReligion,
+            address: rawAddress,
             parentPhone: rawPhone,
             avatarUrl: gender === 'Perempuan' ? FEMALE_AVATAR : MALE_AVATAR,
             createdAt: new Date().toISOString().split('T')[0],

@@ -336,17 +336,22 @@ export const exportStudentsToCSV = (
     lines.push('""');
   }
 
-  const headers = ['No', 'NIS', 'Nama Lengkap', 'Kelas', 'Jenis Kelamin', 'No HP Orang Tua', 'Tanggal Daftar'];
+  const headers = ['No', 'NIS', 'NISN', 'Nama Lengkap', 'Kelas', 'Jenis Kelamin', 'Tempat Lahir', 'Tanggal Lahir', 'Agama', 'Alamat', 'No HP Orang Tua', 'Tanggal Daftar'];
   lines.push(headers.join(','));
 
   students.forEach((std, index) => {
     const row = [
       index + 1,
       `"${std.nis}"`,
+      `"${std.nisn || '-'}"`,
       `"${std.name.replace(/"/g, '""')}"`,
       `"${std.classRoom}"`,
       `"${std.gender}"`,
-      `"${std.parentPhone}"`,
+      `"${std.birthPlace || '-'}"`,
+      `"${std.birthDate || '-'}"`,
+      `"${std.religion || '-'}"`,
+      `"${(std.address || '-').replace(/"/g, '""')}"`,
+      `"${std.parentPhone || '-'}"`,
       `"${std.createdAt || '-'}"`,
     ];
     lines.push(row.join(','));
@@ -409,12 +414,12 @@ export const exportFullBackupJSON = (
 /**
  * Download CSV Template for Bulk Student Import
  */
-export const downloadStudentImportTemplateCSV = (className: string = '1-A') => {
-  const headers = ['NIS', 'Nama', 'Kelas', 'Jenis Kelamin', 'No HP Orang Tua'];
+export const downloadStudentImportTemplateCSV = (className: string = 'Kelas 1') => {
+  const headers = ['NIS', 'NISN', 'Nama', 'Kelas', 'Jenis Kelamin', 'Tempat Lahir', 'Tanggal Lahir', 'Agama', 'Alamat', 'No HP Orang Tua'];
   const sampleRows = [
-    ['1001', 'Ahmad Fauzi', className, 'Laki-laki', '081234567890'],
-    ['1002', 'Anisa Rahmawati', className, 'Perempuan', '081234567891'],
-    ['1003', 'Budi Santoso', className, 'Laki-laki', '081234567892'],
+    ['1001', '0081234561', 'Ahmad Fauzi', className, 'Laki-laki', 'Ogomojolo', '2014-08-12', 'Islam', 'Desa Ogomojolo, Kec. Palasa', '081234567890'],
+    ['1002', '0081234562', 'Anisa Rahmawati', className, 'Perempuan', 'Palasa', '2014-05-14', 'Islam', 'Desa Ogomojolo, Kec. Palasa', '081234567891'],
+    ['1003', '0081234563', 'Budi Santoso', className, 'Laki-laki', 'Parigi', '2014-11-20', 'Islam', 'Desa Ogomojolo, Kec. Palasa', '081234567892'],
   ];
 
   const csvContent = '\uFEFF' + [headers.join(','), ...sampleRows.map(r => r.map(val => `"${val}"`).join(','))].join('\n');
@@ -447,18 +452,22 @@ export const parseStudentImportCSV = (
 
   // Examine header row to determine column indices dynamically
   const headerCols = lines[0].split(/[,;\t]/).map(c => c.replace(/^["']|["']$/g, '').trim().toLowerCase());
-  let nisIdx = headerCols.findIndex(c => c.includes('nis'));
+  let nisIdx = headerCols.findIndex(c => c === 'nis' || (c.includes('nis') && !c.includes('nisn')));
+  let nisnIdx = headerCols.findIndex(c => c.includes('nisn'));
   let nameIdx = headerCols.findIndex(c => c.includes('nama'));
   let classIdx = headerCols.findIndex(c => c.includes('kelas'));
   let genderIdx = headerCols.findIndex(c => c.includes('kelamin') || c.includes('gender') || c.includes('jk'));
+  let birthPlaceIdx = headerCols.findIndex(c => c.includes('tempat') || c.includes('tmp_lahir'));
+  let birthDateIdx = headerCols.findIndex(c => c.includes('tanggal') || c.includes('tgl_lahir') || c.includes('lahir'));
+  let ttlIdx = headerCols.findIndex(c => c === 'ttl' || c.includes('tempat tanggal lahir'));
+  let religionIdx = headerCols.findIndex(c => c.includes('agama'));
+  let addressIdx = headerCols.findIndex(c => c.includes('alamat') || c.includes('domisili'));
   let phoneIdx = headerCols.findIndex(c => c.includes('hp') || c.includes('phone') || c.includes('ortu') || c.includes('telepon') || c.includes('wa'));
 
   // Fallbacks if header matching fails
   if (nisIdx === -1) nisIdx = 0;
   if (nameIdx === -1) nameIdx = 1;
   if (classIdx === -1) classIdx = 2;
-  if (genderIdx === -1) genderIdx = 3;
-  if (phoneIdx === -1) phoneIdx = 4;
 
   for (let i = 1; i < lines.length; i++) {
     const rawLine = lines[i];
@@ -469,10 +478,26 @@ export const parseStudentImportCSV = (
     if (cols.length === 0 || (cols.length === 1 && cols[0] === '')) continue;
 
     const nis = cols[nisIdx] || '';
+    const nisn = nisnIdx >= 0 ? cols[nisnIdx] || '' : '';
     const name = cols[nameIdx] || '';
     const classRoom = cols[classIdx] || defaultClass || 'Kelas 1';
     let gender = cols[genderIdx] || 'Laki-laki';
-    const parentPhone = cols[phoneIdx] || '';
+    const parentPhone = phoneIdx >= 0 ? cols[phoneIdx] || '' : '';
+    let birthPlace = birthPlaceIdx >= 0 ? cols[birthPlaceIdx] || '' : '';
+    let birthDate = birthDateIdx >= 0 ? cols[birthDateIdx] || '' : '';
+    const religion = religionIdx >= 0 ? cols[religionIdx] || 'Islam' : 'Islam';
+    const address = addressIdx >= 0 ? cols[addressIdx] || 'Desa Ogomojolo, Kec. Palasa' : 'Desa Ogomojolo, Kec. Palasa';
+
+    if (ttlIdx >= 0 && (!birthPlace || !birthDate)) {
+      const ttlVal = cols[ttlIdx] || '';
+      if (ttlVal.includes(',')) {
+        const parts = ttlVal.split(',');
+        if (!birthPlace) birthPlace = parts[0].trim();
+        if (!birthDate) birthDate = parts.slice(1).join(',').trim();
+      } else if (!birthPlace) {
+        birthPlace = ttlVal;
+      }
+    }
 
     if (!nis || !name) {
       errors.push(`Baris ${i + 1}: NIS dan Nama Wajib diisi (${rawLine}).`);
@@ -485,7 +510,7 @@ export const parseStudentImportCSV = (
     }
 
     const gLower = gender.toLowerCase();
-    if (gLower.includes('p') || gLower.includes('female') || gLower.includes('wanita')) {
+    if (gLower.includes('p') || gLower.includes('female') || gLower.includes('wanita') || gLower === 'pr') {
       gender = 'Perempuan';
     } else {
       gender = 'Laki-laki';
@@ -496,9 +521,15 @@ export const parseStudentImportCSV = (
     const newStudent: Student = {
       id: uniqueId,
       nis: nis,
+      nisn: nisn || undefined,
       name: name,
       classRoom: classRoom,
       gender: gender as 'Laki-laki' | 'Perempuan',
+      birthPlace: birthPlace || 'Ogomojolo',
+      birthDate: birthDate || undefined,
+      ttl: birthPlace && birthDate ? `${birthPlace}, ${birthDate}` : birthPlace || undefined,
+      religion: religion,
+      address: address,
       parentPhone: parentPhone,
       avatarUrl: gender === 'Perempuan' ? FEMALE_AVATAR : MALE_AVATAR,
       createdAt: new Date().toISOString().split('T')[0],

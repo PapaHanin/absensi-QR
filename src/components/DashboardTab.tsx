@@ -8,6 +8,7 @@ import { isHomeroomClassMatch, formatClassLabel, findHomeroomTeacher, resolveRec
 import { AutoAbsenteeModal } from './AutoAbsenteeModal';
 import { ScheduledLeaveModal } from './ScheduledLeaveModal';
 import { StudentBehaviorModal } from './StudentBehaviorModal';
+import { EditAttendanceModal } from './EditAttendanceModal';
 
 interface DashboardTabProps {
   students: Student[];
@@ -23,8 +24,11 @@ interface DashboardTabProps {
     studentId: string,
     status: AttendanceStatus,
     note?: string,
-    customTime?: string
+    customTime?: string,
+    customDate?: string,
+    teacherOverride?: Teacher | null
   ) => void;
+  onUpdateRecord?: (record: AttendanceRecord) => void;
   onDeleteRecord: (id: string) => void;
   onSaveLeave?: (leave: ScheduledLeave, autoPopulateAttendance: boolean) => void;
   onDeleteLeave?: (leaveId: string) => void;
@@ -44,6 +48,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   teachers,
   currentTeacher,
   onAddManualAttendance,
+  onUpdateRecord,
   onDeleteRecord,
   onSaveLeave,
   onDeleteLeave,
@@ -53,6 +58,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 }) => {
   const isAdmin = currentTeacher?.role === 'admin' || currentTeacher?.teacherType === 'admin';
   const isWaliKelas = !isAdmin && (currentTeacher?.teacherType === 'wali_kelas' || Boolean(currentTeacher?.homeroomClass));
+  const isGuruMapel = !isAdmin && currentTeacher?.teacherType === 'guru_mapel';
   const myHomeroom = currentTeacher?.homeroomClass;
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -65,6 +71,13 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [exportAlertMessage, setExportAlertMessage] = useState<string | null>(null);
 
+  // Dedicated Rekap Scopes for Guru Mapel and Wali Kelas
+  const [guruMapelViewMode, setGuruMapelViewMode] = useState<'mapel_saya' | 'semua'>('mapel_saya');
+  const [waliRecorderFilter, setWaliRecorderFilter] = useState<'semua' | 'wali' | 'mapel'>('semua');
+
+  // Currently selected attendance record for editing
+  const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
+
   // New Features Modals State
   const [isAutoAbsenteeOpen, setIsAutoAbsenteeOpen] = useState(false);
   const [isScheduledLeaveOpen, setIsScheduledLeaveOpen] = useState(false);
@@ -75,6 +88,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const [manualStatus, setManualStatus] = useState<AttendanceStatus>('Hadir');
   const [manualNote, setManualNote] = useState('');
   const [manualTime, setManualTime] = useState('06:50');
+  const [manualDate, setManualDate] = useState<string>(selectedDate);
 
   // Filter mode state: 'daily' | 'range' | 'monthly'
   const [filterMode, setFilterMode] = useState<'daily' | 'range' | 'monthly'>('daily');
@@ -128,15 +142,43 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
   // Statistics calculation
   const stats = useMemo(() => {
-    const relevantStudents = isWaliKelas && myHomeroom
-      ? students.filter((s) => isHomeroomClassMatch(s.classRoom, myHomeroom))
-      : students;
+    let relevantStudents = students;
+    if (isWaliKelas && myHomeroom) {
+      relevantStudents = students.filter((s) => isHomeroomClassMatch(s.classRoom, myHomeroom));
+    } else if (selectedClass !== 'Semua') {
+      relevantStudents = students.filter((s) => isHomeroomClassMatch(s.classRoom, selectedClass) || s.classRoom === selectedClass);
+    }
+
+    let relevantRecords = dateFilteredRecords;
+    if (isGuruMapel && guruMapelViewMode === 'mapel_saya') {
+      // Guru Mapel personal rekap: records taken by this teacher
+      relevantRecords = dateFilteredRecords.filter((r) => {
+        const isMine = (r.teacherId && r.teacherId === currentTeacher?.id) ||
+          resolveRecordTeacher(r, teachers, students, currentTeacher).name.toLowerCase().trim() === currentTeacher?.name.toLowerCase().trim();
+        if (!isMine) return false;
+        if (selectedClass !== 'Semua') {
+          return isHomeroomClassMatch(r.classRoom, selectedClass) || r.classRoom === selectedClass;
+        }
+        return true;
+      });
+    } else if (isWaliKelas && myHomeroom) {
+      // Wali Kelas rekap: ALL records in this homeroom class (both by Wali Kelas & by Guru Mapel!)
+      relevantRecords = dateFilteredRecords.filter((r) => {
+        if (!isHomeroomClassMatch(r.classRoom, myHomeroom)) return false;
+        if (waliRecorderFilter === 'wali') {
+          const res = resolveRecordTeacher(r, teachers, students, currentTeacher);
+          return res.type === 'wali_kelas';
+        } else if (waliRecorderFilter === 'mapel') {
+          const res = resolveRecordTeacher(r, teachers, students, currentTeacher);
+          return res.type === 'guru_mapel';
+        }
+        return true;
+      });
+    } else if (selectedClass !== 'Semua') {
+      relevantRecords = dateFilteredRecords.filter((r) => isHomeroomClassMatch(r.classRoom, selectedClass) || r.classRoom === selectedClass);
+    }
+
     const totalStudents = relevantStudents.length;
-
-    const relevantRecords = isWaliKelas && myHomeroom
-      ? dateFilteredRecords.filter((r) => isHomeroomClassMatch(r.classRoom, myHomeroom))
-      : (selectedClass !== 'Semua' ? dateFilteredRecords.filter((r) => isHomeroomClassMatch(r.classRoom, selectedClass) || r.classRoom === selectedClass) : dateFilteredRecords);
-
     const hadir = relevantRecords.filter((r) => r.status === 'Hadir').length;
     const terlambat = relevantRecords.filter((r) => r.status === 'Terlambat').length;
     const izinSakit = relevantRecords.filter((r) => r.status === 'Izin' || r.status === 'Sakit').length;
@@ -145,7 +187,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     const unrecorded = Math.max(0, totalStudents - totalRecorded);
 
     return { totalStudents, hadir, terlambat, izinSakit, alpa, totalRecorded, unrecorded };
-  }, [students, dateFilteredRecords, isWaliKelas, myHomeroom, selectedClass]);
+  }, [students, dateFilteredRecords, isWaliKelas, myHomeroom, isGuruMapel, guruMapelViewMode, waliRecorderFilter, currentTeacher, teachers, selectedClass]);
 
   // Active Leaves for today/selectedDate
   const activeLeavesCount = useMemo(() => {
@@ -164,13 +206,25 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const teacherAttendanceActivity = useMemo(() => {
     return teachers.map((tch) => {
       const byTeacher = dateFilteredRecords.filter((r) => {
-        if (r.teacherId && r.teacherId === tch.id) return true;
-        const resolved = resolveRecordTeacher(r, teachers, students, currentTeacher);
-        if (resolved.name.toLowerCase().trim() === tch.name.toLowerCase().trim()) return true;
-        if (tch.teacherType === 'wali_kelas' && tch.homeroomClass && isHomeroomClassMatch(r.classRoom, tch.homeroomClass)) {
-          return true;
+        if (tch.teacherType === 'guru_mapel') {
+          // Guru Mapel: records where they are the assigned teacher
+          if (r.teacherId && r.teacherId === tch.id) return true;
+          const resolved = resolveRecordTeacher(r, teachers, students, currentTeacher);
+          return resolved.name.toLowerCase().trim() === tch.name.toLowerCase().trim();
+        } else if (tch.teacherType === 'wali_kelas') {
+          // Wali Kelas: records in their class (including via Guru Mapel!) OR records taken by them
+          if (tch.homeroomClass && isHomeroomClassMatch(r.classRoom, tch.homeroomClass)) {
+            return true;
+          }
+          if (r.teacherId && r.teacherId === tch.id) return true;
+          const resolved = resolveRecordTeacher(r, teachers, students, currentTeacher);
+          return resolved.name.toLowerCase().trim() === tch.name.toLowerCase().trim();
+        } else {
+          // Admin
+          if (r.teacherId && r.teacherId === tch.id) return true;
+          const resolved = resolveRecordTeacher(r, teachers, students, currentTeacher);
+          return resolved.name.toLowerCase().trim() === tch.name.toLowerCase().trim();
         }
-        return false;
       });
 
       const count = byTeacher.length;
@@ -179,11 +233,20 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       const times = byTeacher.map((r) => r.time).filter(Boolean).sort();
       const latestTime = times.length > 0 ? times[times.length - 1] : null;
 
+      // Count records in homeroom conducted specifically via Guru Mapel
+      const viaMapelCount = tch.teacherType === 'wali_kelas'
+        ? byTeacher.filter((r) => {
+            const res = resolveRecordTeacher(r, teachers, students, currentTeacher);
+            return res.type === 'guru_mapel';
+          }).length
+        : 0;
+
       return {
         teacher: tch,
         count,
         classesRecorded,
         latestTime,
+        viaMapelCount,
         isDone: count > 0,
       };
     });
@@ -210,6 +273,24 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         matchClass = isHomeroomClassMatch(rec.classRoom, selectedClass) || rec.classRoom === selectedClass;
       }
 
+      // If Guru Mapel is in 'mapel_saya' mode, filter to only their records
+      let matchGuruMapelScope = true;
+      if (isGuruMapel && guruMapelViewMode === 'mapel_saya') {
+        matchGuruMapelScope =
+          rec.teacherId === currentTeacher?.id ||
+          resolved.name.toLowerCase().trim() === currentTeacher?.name.toLowerCase().trim();
+      }
+
+      // If Wali Kelas has chosen to filter by recorder type
+      let matchWaliRecorder = true;
+      if (isWaliKelas && myHomeroom) {
+        if (waliRecorderFilter === 'wali') {
+          matchWaliRecorder = resolved.type === 'wali_kelas';
+        } else if (waliRecorderFilter === 'mapel') {
+          matchWaliRecorder = resolved.type === 'guru_mapel';
+        }
+      }
+
       const matchStatus = selectedStatus === 'Semua' || rec.status === selectedStatus;
 
       let matchTeacher = true;
@@ -221,9 +302,23 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           (targetTeacher && resolved.name.toLowerCase().trim() === targetTeacher.name.toLowerCase().trim());
       }
 
-      return matchSearch && matchClass && matchStatus && matchTeacher;
+      return matchSearch && matchClass && matchGuruMapelScope && matchWaliRecorder && matchStatus && matchTeacher;
     });
-  }, [dateFilteredRecords, searchTerm, isWaliKelas, myHomeroom, selectedClass, selectedStatus, selectedTeacherFilter, teachers, students, currentTeacher]);
+  }, [
+    dateFilteredRecords,
+    searchTerm,
+    isWaliKelas,
+    myHomeroom,
+    isGuruMapel,
+    guruMapelViewMode,
+    waliRecorderFilter,
+    selectedClass,
+    selectedStatus,
+    selectedTeacherFilter,
+    teachers,
+    students,
+    currentTeacher,
+  ]);
 
   // Per-Student Monthly Summary Breakdown: Hadir, Terlambat, Sakit, Izin, Alfa
   const monthlyStudentRecaps = useMemo(() => {
@@ -384,7 +479,14 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       alert('Pilih siswa terlebih dahulu!');
       return;
     }
-    onAddManualAttendance(manualStudentId, manualStatus, manualNote, `${manualTime}:00`);
+    onAddManualAttendance(
+      manualStudentId,
+      manualStatus,
+      manualNote,
+      `${manualTime}:00`,
+      manualDate || selectedDate,
+      currentTeacher || null
+    );
     setIsManualModalOpen(false);
     setManualStudentId('');
     setManualNote('');
@@ -447,11 +549,15 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setIsManualModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition-all cursor-pointer border border-slate-200 dark:border-slate-700"
+              onClick={() => {
+                setManualDate(selectedDate);
+                setIsManualModalOpen(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 text-xs font-bold rounded-xl transition-all cursor-pointer border border-amber-300/80 dark:border-amber-700/80 shadow-2xs"
+              title="Input kehadiran siswa secara manual atau koreksi absensi untuk tanggal lampau"
             >
-              <i className="fa-solid fa-user-plus text-indigo-600 dark:text-indigo-400"></i>
-              <span>Absen Manual</span>
+              <i className="fa-solid fa-pen-to-square text-amber-600 dark:text-amber-400"></i>
+              <span>+ Absen / Koreksi Lampau</span>
             </button>
 
             <button
@@ -461,15 +567,6 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             >
               <i className="fa-solid fa-file-pdf"></i>
               <span>Unduh PDF</span>
-            </button>
-
-            <button
-              onClick={handleExportCSV}
-              className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
-              title="Ekspor Data ke File Excel / CSV"
-            >
-              <i className="fa-solid fa-file-csv"></i>
-              <span>Ekspor CSV</span>
             </button>
 
             {onOpenERaporSync && (
@@ -580,6 +677,120 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             )}
           </div>
         </div>
+
+        {/* Guru Mapel Dedicated Portal Banner */}
+        {isGuruMapel && (
+          <div className="bg-blue-50/90 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/80 p-3.5 rounded-xl flex flex-col md:flex-row md:items-center md:justify-between gap-3 shadow-2xs">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center text-base font-bold shadow-xs shrink-0">
+                <i className="fa-solid fa-book-open-reader"></i>
+              </div>
+              <div>
+                <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex flex-wrap items-center gap-1.5">
+                  <span className="text-slate-600 dark:text-slate-400">Portal Guru Mata Pelajaran:</span>
+                  <span className="text-blue-700 dark:text-blue-300 font-extrabold">{currentTeacher?.name}</span>
+                  <span className="px-2 py-0.5 rounded-md text-[10px] bg-blue-100 dark:bg-blue-900/80 text-blue-800 dark:text-blue-200 font-extrabold border border-blue-200 dark:border-blue-700">
+                    Mapel: {currentTeacher?.subject}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Rekap kehadiran siswa khusus mata pelajaran Anda terpisah rapi, dan otomatis terrekap untuk Wali Kelas yang bersangkutan.
+                </p>
+              </div>
+            </div>
+
+            {/* View Scope Toggle for Guru Mapel */}
+            <div className="flex items-center gap-1 bg-white dark:bg-slate-900 p-1 rounded-xl border border-blue-200 dark:border-blue-800 text-xs shrink-0 self-start md:self-auto">
+              <button
+                type="button"
+                onClick={() => setGuruMapelViewMode('mapel_saya')}
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 font-bold cursor-pointer ${
+                  guruMapelViewMode === 'mapel_saya'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <i className="fa-solid fa-user-check text-xs"></i>
+                <span>Rekap Mapel Saya</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setGuruMapelViewMode('semua')}
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 font-bold cursor-pointer ${
+                  guruMapelViewMode === 'semua'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <i className="fa-solid fa-school text-xs"></i>
+                <span>Semua Siswa Sekolah</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Wali Kelas Dedicated Portal Banner */}
+        {isWaliKelas && (
+          <div className="bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 p-3.5 rounded-xl flex flex-col md:flex-row md:items-center md:justify-between gap-3 shadow-2xs">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-base font-bold shadow-xs shrink-0">
+                <i className="fa-solid fa-chalkboard-user"></i>
+              </div>
+              <div>
+                <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex flex-wrap items-center gap-1.5">
+                  <span className="text-slate-600 dark:text-slate-400">Portal Wali Kelas:</span>
+                  <span className="text-emerald-700 dark:text-emerald-300 font-extrabold">{currentTeacher?.name}</span>
+                  <span className="px-2 py-0.5 rounded-md text-[10px] bg-emerald-100 dark:bg-emerald-900/80 text-emerald-800 dark:text-emerald-200 font-extrabold border border-emerald-200 dark:border-emerald-700">
+                    Kelas {myHomeroom}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Semua presensi siswa kelas {myHomeroom} (baik dari Anda maupun dari Guru Mapel) otomatis terintegrasi dan terrekap di sini.
+                </p>
+              </div>
+            </div>
+
+            {/* Recorder filter for Wali Kelas */}
+            <div className="flex items-center gap-1 bg-white dark:bg-slate-900 p-1 rounded-xl border border-emerald-200 dark:border-emerald-800 text-xs shrink-0 self-start md:self-auto">
+              <button
+                type="button"
+                onClick={() => setWaliRecorderFilter('semua')}
+                className={`px-2.5 py-1.5 rounded-lg transition-all font-bold cursor-pointer ${
+                  waliRecorderFilter === 'semua'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title="Tampilkan semua absensi di kelas Anda"
+              >
+                Semua Pengabsen
+              </button>
+              <button
+                type="button"
+                onClick={() => setWaliRecorderFilter('wali')}
+                className={`px-2.5 py-1.5 rounded-lg transition-all font-bold cursor-pointer ${
+                  waliRecorderFilter === 'wali'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title="Hanya absensi yang dilakukan oleh Wali Kelas"
+              >
+                Oleh Wali
+              </button>
+              <button
+                type="button"
+                onClick={() => setWaliRecorderFilter('mapel')}
+                className={`px-2.5 py-1.5 rounded-lg transition-all font-bold cursor-pointer ${
+                  waliRecorderFilter === 'mapel'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title="Hanya absensi yang dilakukan oleh Guru Mapel"
+              >
+                Oleh Guru Mapel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 5 Bento Grid Stat Cards */}
@@ -1330,7 +1541,18 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                           {record.note || '-'}
                         </td>
                         <td className="py-3 px-4 text-right">
-                          <div className="flex items-center justify-end gap-1">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Tombol Edit Absen (Koreksi Tanggal Lampau, Jam, Status, Keterangan, Guru) */}
+                            <button
+                              type="button"
+                              onClick={() => setEditingRecord(record)}
+                              title={`Edit / koreksi absensi ${record.studentName} (tanggal lampau, status, jam, catatan)`}
+                              className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-700 dark:text-amber-300 rounded-lg transition-colors cursor-pointer text-xs flex items-center gap-1 font-bold border border-amber-200 dark:border-amber-800 shadow-2xs"
+                            >
+                              <i className="fa-solid fa-pen-to-square text-xs"></i>
+                              <span>Edit</span>
+                            </button>
+
                             {studentInfo ? (
                               <button
                                 onClick={() =>
@@ -1423,6 +1645,21 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             )}
 
             <form onSubmit={handleSubmitManual} className="space-y-4">
+              {/* Tanggal Absensi (Dapat pilih lampau) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>Tanggal Presensi <span className="text-rose-500">*</span></span>
+                  <span className="text-[10px] text-indigo-600 font-semibold">Bisa pilih tanggal lampau</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={manualDate}
+                  onChange={(e) => setManualDate(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-bold focus:outline-none focus:border-indigo-500 focus:bg-white cursor-pointer"
+                />
+              </div>
+
               {/* Select Student */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -1573,6 +1810,27 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           onSaveBehaviorLog={onSaveBehaviorLog}
           onDeleteBehaviorLog={onDeleteBehaviorLog}
           onClose={() => setIsStudentBehaviorOpen(false)}
+        />
+      )}
+
+      {/* 4. Modal Edit / Koreksi Attendance Record */}
+      {editingRecord && (
+        <EditAttendanceModal
+          record={editingRecord}
+          students={students}
+          teachers={teachers}
+          currentTeacher={currentTeacher || null}
+          onSave={(updatedRecord) => {
+            if (onUpdateRecord) {
+              onUpdateRecord(updatedRecord);
+            }
+            setEditingRecord(null);
+          }}
+          onDelete={(id) => {
+            onDeleteRecord(id);
+            setEditingRecord(null);
+          }}
+          onClose={() => setEditingRecord(null)}
         />
       )}
     </div>

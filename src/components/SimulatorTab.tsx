@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Student, AttendanceRecord, SystemSettings, Teacher } from '../types';
 import { SD_CLASSES } from '../data/initialData';
 import { formatClassLabel } from '../utils/classUtils';
+import { HeadmasterBarcode } from '../utils/headmasterBarcode';
 
 interface SimulatorTabProps {
   students: Student[];
@@ -39,6 +40,7 @@ export const SimulatorTab: React.FC<SimulatorTabProps> = ({
   const [academicYear, setAcademicYear] = useState(settings.academicYear);
   const [headmasterName, setHeadmasterName] = useState(settings.headmasterName || 'Drs. H. Mulyadi, M.Pd');
   const [headmasterNip, setHeadmasterNip] = useState(settings.headmasterNip || '19680512 199403 1 005');
+  const [headmasterBarcodeUrl, setHeadmasterBarcodeUrl] = useState(settings.headmasterBarcodeUrl || '');
   const [schoolCity, setSchoolCity] = useState(settings.schoolCity || 'Jakarta Selatan');
   const [schoolAddress, setSchoolAddress] = useState(settings.schoolAddress || '');
   const [announcementTitle, setAnnouncementTitle] = useState(settings.announcementTitle || '');
@@ -54,6 +56,7 @@ export const SimulatorTab: React.FC<SimulatorTabProps> = ({
     setAcademicYear(settings.academicYear);
     setHeadmasterName(settings.headmasterName || 'Drs. H. Mulyadi, M.Pd');
     setHeadmasterNip(settings.headmasterNip || '19680512 199403 1 005');
+    setHeadmasterBarcodeUrl(settings.headmasterBarcodeUrl || '');
     setSchoolCity(settings.schoolCity || 'Jakarta Selatan');
     setSchoolAddress(settings.schoolAddress || '');
     setAnnouncementTitle(settings.announcementTitle || '');
@@ -73,6 +76,7 @@ export const SimulatorTab: React.FC<SimulatorTabProps> = ({
       academicYear: academicYear.trim() || '2025/2026',
       headmasterName: headmasterName.trim(),
       headmasterNip: headmasterNip.trim(),
+      headmasterBarcodeUrl: headmasterBarcodeUrl.trim(),
       schoolCity: schoolCity.trim() || 'Jakarta',
       schoolAddress: schoolAddress.trim(),
       // Only admin is permitted to update announcement content
@@ -302,6 +306,61 @@ export const SimulatorTab: React.FC<SimulatorTabProps> = ({
                       onChange={(e) => setHeadmasterNip(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono font-bold focus:outline-none focus:border-indigo-500 focus:bg-white"
                     />
+                  </div>
+
+                  {/* Barcode TTE Kepala Sekolah */}
+                  <div className="pt-2 border-t border-slate-200">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Barcode TTE Kepala Sekolah (Muncul di Kartu Siswa)
+                    </label>
+                    <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                      <div className="shrink-0 p-1 bg-white rounded-lg border border-slate-200 shadow-2xs">
+                        <HeadmasterBarcode
+                          customBarcodeUrl={headmasterBarcodeUrl}
+                          size={52}
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0 space-y-1.5">
+                        <p className="text-[10.5px] text-slate-600 font-medium leading-tight">
+                          {headmasterBarcodeUrl
+                            ? 'Barcode kustom tersimpan.'
+                            : 'Barcode resmi SDN Kecil Ogomojolo.'}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="cursor-pointer inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition-colors shadow-2xs">
+                            <i className="fa-solid fa-upload"></i>
+                            <span>Ganti File Barcode</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onload = () => {
+                                    if (typeof reader.result === 'string') {
+                                      setHeadmasterBarcodeUrl(reader.result);
+                                    }
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                            />
+                          </label>
+                          {headmasterBarcodeUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setHeadmasterBarcodeUrl('')}
+                              className="cursor-pointer inline-flex items-center gap-1 px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-[10px] font-semibold transition-colors border border-slate-200"
+                            >
+                              <i className="fa-solid fa-rotate-left"></i>
+                              <span>Reset SDN Kecil Ogomojolo</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
