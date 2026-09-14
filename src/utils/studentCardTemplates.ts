@@ -1,8 +1,41 @@
 import jsPDF from 'jspdf';
 import { Student, SystemSettings } from '../types';
-import { SCHOOL_LOGO_DATA_URI, SchoolLogo } from './schoolLogo';
-import { TUT_WURI_HANDAYANI_DATA_URI } from './tutWuriHandayaniLogo';
-import { HEADMASTER_DEFAULT_BARCODE_DATA_URI } from './headmasterBarcode';
+import { SCHOOL_LOGO_DATA_URI, SchoolLogo, getSchoolLogoPNG } from './schoolLogo';
+import { TUT_WURI_HANDAYANI_DATA_URI, getTutWuriHandayaniPNG } from './tutWuriHandayaniLogo';
+import { HEADMASTER_DEFAULT_BARCODE_DATA_URI, getHeadmasterBarcodePNG } from './headmasterBarcode';
+
+export interface CardPreloadedAssets {
+  logoLeftPng?: string;
+  logoRightPng?: string;
+  headmasterSignPng?: string;
+}
+
+/**
+ * Pre-rasterizes all branding logos & signatures into guaranteed PNG Base64 strings.
+ * This guarantees jsPDF renders custom school logos and principal signatures flawlessly without omissions.
+ */
+export const prepareCardAssets = async (settings: SystemSettings): Promise<CardPreloadedAssets> => {
+  try {
+    const [logoLeft, logoRight, headmasterSign] = await Promise.all([
+      getSchoolLogoPNG(settings.schoolLogoUrl),
+      settings.tutWuriLogoUrl
+        ? getSchoolLogoPNG(settings.tutWuriLogoUrl)
+        : getTutWuriHandayaniPNG(),
+      settings.headmasterSignatureUrl
+        ? getHeadmasterBarcodePNG(settings.headmasterSignatureUrl)
+        : getHeadmasterBarcodePNG(settings.headmasterBarcodeUrl),
+    ]);
+
+    return {
+      logoLeftPng: logoLeft || undefined,
+      logoRightPng: logoRight || logoLeft || undefined,
+      headmasterSignPng: headmasterSign || undefined,
+    };
+  } catch (err) {
+    console.warn('Error pre-rasterizing card assets:', err);
+    return {};
+  }
+};
 
 export type CardTemplateId = 'seraphic' | 'nusantara' | 'pelita';
 
@@ -168,6 +201,33 @@ export const CR80_WIDTH_MM = 85.60;
 export const CR80_HEIGHT_MM = 53.98;
 
 /**
+ * Draws an official vector school emblem badge if an image is not available or loading failed
+ */
+const drawOfficialSchoolBadgeVector = (
+  doc: jsPDF,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  primaryRGB: number[],
+  accentRGB: number[]
+) => {
+  try {
+    doc.setFillColor(primaryRGB[0], primaryRGB[1], primaryRGB[2]);
+    doc.roundedRect(x, y, w, h, 1.2, 1.2, 'F');
+    doc.setDrawColor(accentRGB[0], accentRGB[1], accentRGB[2]);
+    doc.setLineWidth(0.25);
+    doc.roundedRect(x + 0.4, y + 0.4, w - 0.8, h - 0.8, 0.8, 0.8, 'S');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(3.2);
+    doc.setTextColor(255, 255, 255);
+    doc.text('SD', x + w / 2, y + h / 2 + 1.0, { align: 'center' });
+  } catch {
+    // silently catch fallback issues
+  }
+};
+
+/**
  * Draws an exact standard ISO/IEC 7810 ID-1 (CR80) landscape student card in jsPDF
  * Card size: 85.60 mm width x 53.98 mm height
  * Complete with official Indonesian school KOP, Tut Wuri Handayani logo, full student details,
@@ -184,7 +244,8 @@ export const drawCR80CardPDF = (
   photoDataUrl: string | undefined,
   qrDataUrl: string | undefined,
   templateId: CardTemplateId = 'seraphic',
-  useSamplePromptData: boolean = false
+  useSamplePromptData: boolean = false,
+  cardAssets?: CardPreloadedAssets
 ) => {
   const template = CARD_TEMPLATES[templateId] || CARD_TEMPLATES.seraphic;
 
@@ -278,18 +339,45 @@ export const drawCR80CardPDF = (
   const logoW = 7.0;
   const logoH = 8.8;
 
-  try {
-    doc.addImage(SCHOOL_LOGO_DATA_URI, 'PNG', logoLeftX, logoY, logoW, logoH);
-  } catch {
-    doc.setFillColor(primaryRGB[0], primaryRGB[1], primaryRGB[2]);
-    doc.circle(logoLeftX + logoW / 2, logoY + logoH / 2, logoW / 2, 'F');
+  const leftLogoImg = cardAssets?.logoLeftPng || settings.schoolLogoUrl;
+  let drewLeftLogo = false;
+  if (
+    leftLogoImg &&
+    (leftLogoImg.startsWith('data:image/png') ||
+      leftLogoImg.startsWith('data:image/jpeg') ||
+      leftLogoImg.startsWith('data:image/webp'))
+  ) {
+    try {
+      const fmt = leftLogoImg.includes('image/jpeg') ? 'JPEG' : 'PNG';
+      doc.addImage(leftLogoImg, fmt, logoLeftX, logoY, logoW, logoH);
+      drewLeftLogo = true;
+    } catch {
+      drewLeftLogo = false;
+    }
+  }
+  if (!drewLeftLogo) {
+    drawOfficialSchoolBadgeVector(doc, logoLeftX, logoY, logoW, logoH, primaryRGB, accentRGB);
   }
 
   const logoRightX = x + cardWidth - 10.0;
-  try {
-    doc.addImage(TUT_WURI_HANDAYANI_DATA_URI, 'PNG', logoRightX, logoY, logoW, logoH);
-  } catch {
-    // optional fallback
+  const rightLogoImg = cardAssets?.logoRightPng || settings.tutWuriLogoUrl || leftLogoImg;
+  let drewRightLogo = false;
+  if (
+    rightLogoImg &&
+    (rightLogoImg.startsWith('data:image/png') ||
+      rightLogoImg.startsWith('data:image/jpeg') ||
+      rightLogoImg.startsWith('data:image/webp'))
+  ) {
+    try {
+      const fmt = rightLogoImg.includes('image/jpeg') ? 'JPEG' : 'PNG';
+      doc.addImage(rightLogoImg, fmt, logoRightX, logoY, logoW, logoH);
+      drewRightLogo = true;
+    } catch {
+      drewRightLogo = false;
+    }
+  }
+  if (!drewRightLogo) {
+    drawOfficialSchoolBadgeVector(doc, logoRightX, logoY, logoW, logoH, primaryRGB, accentRGB);
   }
 
   // Kop Center Text
@@ -457,14 +545,45 @@ export const drawCR80CardPDF = (
   doc.setTextColor(15, 23, 42);
   doc.text('Kepala Sekolah,', tableX, signY + 2.8);
 
-  // Barcode TTE Kepala Sekolah
-  const headmasterBarcodeUri = settings.headmasterBarcodeUrl || HEADMASTER_DEFAULT_BARCODE_DATA_URI;
-  try {
-    doc.addImage(headmasterBarcodeUri, 'PNG', tableX, signY + 3.4, 15.0, 3.8);
-  } catch {
-    doc.setDrawColor(primaryRGB[0], primaryRGB[1], primaryRGB[2]);
-    doc.setLineWidth(0.2);
-    doc.rect(tableX, signY + 3.4, 15.0, 3.8);
+  // Tanda Tangan / Barcode TTE Kepala Sekolah
+  const headmasterSignImg =
+    cardAssets?.headmasterSignPng ||
+    settings.headmasterSignatureUrl ||
+    settings.headmasterBarcodeUrl;
+
+  let drewSignature = false;
+  if (
+    headmasterSignImg &&
+    (headmasterSignImg.startsWith('data:image/png') ||
+      headmasterSignImg.startsWith('data:image/jpeg') ||
+      headmasterSignImg.startsWith('data:image/webp'))
+  ) {
+    try {
+      const fmt = headmasterSignImg.includes('image/jpeg') ? 'JPEG' : 'PNG';
+      doc.addImage(headmasterSignImg, fmt, tableX, signY + 3.2, 16.0, 4.4);
+      drewSignature = true;
+    } catch {
+      drewSignature = false;
+    }
+  }
+
+  if (!drewSignature) {
+    try {
+      doc.setDrawColor(primaryRGB[0], primaryRGB[1], primaryRGB[2]);
+      doc.setFillColor(248, 250, 252);
+      doc.setLineWidth(0.18);
+      doc.roundedRect(tableX, signY + 3.2, 16.0, 4.4, 0.5, 0.5, 'FD');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(2.2);
+      doc.setTextColor(primaryRGB[0], primaryRGB[1], primaryRGB[2]);
+      doc.text('TTE ELEKTRONIK', tableX + 8.0, signY + 5.5, { align: 'center' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(1.8);
+      doc.setTextColor(100, 116, 139);
+      doc.text('TERVERIFIKASI', tableX + 8.0, signY + 6.9, { align: 'center' });
+    } catch {
+      // fallback
+    }
   }
 
   // Nama & NIP

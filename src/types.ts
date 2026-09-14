@@ -46,6 +46,9 @@ export interface SystemSettings {
   headmasterName?: string; // e.g. "Drs. H. Mulyadi, M.Pd"
   headmasterNip?: string; // e.g. "19680512 199403 1 005"
   headmasterBarcodeUrl?: string; // e.g. Base64 or URL barcode tanda tangan kepala sekolah
+  headmasterSignatureUrl?: string; // e.g. Base64 or URL scan/foto tanda tangan asli kepala sekolah
+  schoolLogoUrl?: string; // e.g. Base64 or URL logo resmi sekolah
+  tutWuriLogoUrl?: string; // e.g. Base64 or URL logo tut wuri handayani / logo kanan
   schoolCity?: string; // e.g. "Jakarta"
   announcementTitle?: string;
   announcementContent?: string;

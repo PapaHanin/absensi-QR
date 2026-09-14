@@ -33,7 +33,7 @@ export const SDN_KECIL_OGOMOJOLO_INNER_SHIELD_PATH =
   'C 118,23 109,19 100,19 Z';
 
 export const SCHOOL_LOGO_SVG = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 255" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 255" width="200" height="255">
   <defs>
     <!-- Sky Gradient -->
     <linearGradient id="ogoLogoSky" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -247,40 +247,62 @@ export const SCHOOL_LOGO_SVG = `
 `.trim();
 
 /**
- * School Logo as SVG Data URI for <img> and jsPDF!
+ * Safe Base64 SVG Data URI for <img> and reliable canvas rasterization
  */
-export const SCHOOL_LOGO_DATA_URI = `data:image/svg+xml;utf8,${encodeURIComponent(SCHOOL_LOGO_SVG)}`;
+export const SCHOOL_LOGO_DATA_URI =
+  typeof window !== 'undefined' && window.btoa
+    ? `data:image/svg+xml;base64,${window.btoa(unescape(encodeURIComponent(SCHOOL_LOGO_SVG)))}`
+    : `data:image/svg+xml;utf8,${encodeURIComponent(SCHOOL_LOGO_SVG)}`;
 
 /**
  * Cached PNG data URL for maximum jsPDF compatibility
  */
 let cachedSchoolLogoPng: string | null = null;
 
-export const getSchoolLogoPNG = async (): Promise<string> => {
-  if (cachedSchoolLogoPng) return cachedSchoolLogoPng;
+export const getSchoolLogoPNG = async (customLogoUrl?: string): Promise<string> => {
+  if (customLogoUrl) {
+    if (customLogoUrl.startsWith('data:image/png') || customLogoUrl.startsWith('data:image/jpeg') || customLogoUrl.startsWith('data:image/webp')) {
+      return customLogoUrl;
+    }
+  } else if (cachedSchoolLogoPng) {
+    return cachedSchoolLogoPng;
+  }
+
+  const srcToLoad = customLogoUrl || SCHOOL_LOGO_DATA_URI;
 
   return new Promise((resolve) => {
+    if (typeof window === 'undefined') {
+      return resolve('');
+    }
     const img = new Image();
     img.crossOrigin = 'Anonymous';
     img.onload = () => {
       try {
         const canvas = document.createElement('canvas');
-        canvas.width = 300;
-        canvas.height = 380;
+        const w = img.naturalWidth || 300;
+        const h = img.naturalHeight || 380;
+        canvas.width = w;
+        canvas.height = h;
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(img, 0, 0, 300, 380);
-          cachedSchoolLogoPng = canvas.toDataURL('image/png');
-          resolve(cachedSchoolLogoPng);
+          ctx.clearRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          const pngUrl = canvas.toDataURL('image/png');
+          if (!customLogoUrl) {
+            cachedSchoolLogoPng = pngUrl;
+          }
+          resolve(pngUrl);
         } else {
-          resolve(SCHOOL_LOGO_DATA_URI);
+          resolve('');
         }
       } catch {
-        resolve(SCHOOL_LOGO_DATA_URI);
+        resolve('');
       }
     };
-    img.onerror = () => resolve(SCHOOL_LOGO_DATA_URI);
-    img.src = SCHOOL_LOGO_DATA_URI;
+    img.onerror = () => {
+      resolve('');
+    };
+    img.src = srcToLoad;
   });
 };
 

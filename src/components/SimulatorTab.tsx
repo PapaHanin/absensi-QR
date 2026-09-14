@@ -3,6 +3,7 @@ import { Student, AttendanceRecord, SystemSettings, Teacher } from '../types';
 import { SD_CLASSES } from '../data/initialData';
 import { formatClassLabel } from '../utils/classUtils';
 import { HeadmasterBarcode } from '../utils/headmasterBarcode';
+import { CardBrandingModal } from './CardBrandingModal';
 
 interface SimulatorTabProps {
   students: Student[];
@@ -48,6 +49,7 @@ export const SimulatorTab: React.FC<SimulatorTabProps> = ({
 
   const [simulatedClass, setSimulatedClass] = useState<string>('Semua');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [isBrandingOpen, setIsBrandingOpen] = useState(false);
 
   // Sync with prop updates
   useEffect(() => {
@@ -361,6 +363,20 @@ export const SimulatorTab: React.FC<SimulatorTabProps> = ({
                         </div>
                       </div>
                     </div>
+
+                    <div className="mt-2.5 pt-2 border-t border-slate-200/70 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[10.5px] text-slate-500 font-medium">
+                        Atur logo sekolah, Tut Wuri Handayani, dan TTD Kepsek:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsBrandingOpen(true)}
+                        className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10.5px] font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                      >
+                        <i className="fa-solid fa-stamp text-[10px]"></i>
+                        <span>Kelola Logo & TTD Kartu Siswa</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -592,6 +608,16 @@ export const SimulatorTab: React.FC<SimulatorTabProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal Kelola Logo & TTD Kartu Siswa */}
+      {isBrandingOpen && (
+        <CardBrandingModal
+          isOpen={isBrandingOpen}
+          settings={settings}
+          onUpdateSettings={onUpdateSettings}
+          onClose={() => setIsBrandingOpen(false)}
+        />
       )}
     </div>
   );

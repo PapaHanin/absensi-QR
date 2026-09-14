@@ -8,8 +8,10 @@ import {
   CR80_WIDTH_MM,
   CR80_HEIGHT_MM,
   drawCR80CardPDF,
+  prepareCardAssets,
 } from '../utils/studentCardTemplates';
 import { CR80StudentCard } from './CR80StudentCard';
+import { CardBrandingModal } from './CardBrandingModal';
 import jsPDF from 'jspdf';
 
 interface BulkCardPrintModalProps {
@@ -19,6 +21,7 @@ interface BulkCardPrintModalProps {
   initialClass?: string;
   initialSelectedIds?: string[];
   onSaveDefaultTemplate?: (templateId: CardTemplateId) => void;
+  onUpdateSettings?: (updated: SystemSettings) => void;
   onClose: () => void;
 }
 
@@ -29,6 +32,7 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
   initialClass = 'Semua',
   initialSelectedIds,
   onSaveDefaultTemplate,
+  onUpdateSettings,
   onClose,
 }) => {
   const isAdmin = currentTeacher?.role === 'admin' || currentTeacher?.teacherType === 'admin';
@@ -40,6 +44,7 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
     return settings.defaultCardTemplate || 'seraphic';
   });
   const [toastMsg, setToastMsg] = useState<string>('');
+  const [isBrandingOpen, setIsBrandingOpen] = useState<boolean>(false);
 
   // Determine active class filter:
   // If Wali Kelas, strictly lock to their homeroom class
@@ -258,6 +263,9 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
       const gapY = 8;
       const marginY = (297 - (4 * cardHeight + 3 * gapY)) / 2;
 
+      // Pre-rasterize left logo, right logo, and signature to clean PNG data URLs for jsPDF
+      const cardAssets = await prepareCardAssets(settings);
+
       for (let i = 0; i < printableStudents.length; i++) {
         const student = printableStudents[i];
         const slotIndex = i % cardsPerPage;
@@ -282,7 +290,8 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
           photoMap[student.id],
           qrMap[student.id],
           selectedTemplate,
-          false
+          false,
+          cardAssets
         );
 
         // Cutting Guideline Marks (Dashed light grey lines between cards)
@@ -427,6 +436,16 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsBrandingOpen(true)}
+              className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              title="Unggah Logo Sekolah & Tanda Tangan / Barcode Kepala Sekolah"
+            >
+              <i className="fa-solid fa-stamp text-amber-600 dark:text-amber-400" />
+              <span>Upload Logo & TTD</span>
+            </button>
+
             {isCurrentDefault ? (
               <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                 <i className="fa-solid fa-star text-amber-500" />
@@ -632,6 +651,22 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Modal Upload Logo & TTD Kepsek */}
+      {isBrandingOpen && (
+        <CardBrandingModal
+          isOpen={isBrandingOpen}
+          settings={settings}
+          onUpdateSettings={(updated) => {
+            if (onUpdateSettings) {
+              onUpdateSettings(updated);
+            }
+            setToastMsg('Logo & TTD Kepsek berhasil diperbarui!');
+            setTimeout(() => setToastMsg(''), 3000);
+          }}
+          onClose={() => setIsBrandingOpen(false)}
+        />
+      )}
     </div>
   );
 };

@@ -3,6 +3,7 @@ import { Student, Gender, SystemSettings, Teacher, ScheduledLeave, BehaviorLog }
 import { StudentCardModal } from './StudentCardModal';
 import { BulkCardPrintModal } from './BulkCardPrintModal';
 import { CardTemplateSelectionModal } from './CardTemplateSelectionModal';
+import { CardBrandingModal } from './CardBrandingModal';
 import { CardTemplateId } from '../utils/studentCardTemplates';
 import { MALE_BW_AVATAR, FEMALE_BW_AVATAR, getDefaultAvatar } from '../utils/avatars';
 import { SD_CLASSES } from '../data/initialData';
@@ -119,6 +120,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
   const [cardStudent, setCardStudent] = useState<Student | null>(null);
   const [isBulkPrintModalOpen, setIsBulkPrintModalOpen] = useState(false);
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [isBrandingModalOpen, setIsBrandingModalOpen] = useState(false);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
 
   // Form Fields (includes photo base64 string, NISN, TTL, Address)
@@ -591,6 +593,16 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
           >
             <i className="fa-solid fa-id-card-clip text-xs"></i>
             <span>Pilih Desain Kartu</span>
+          </button>
+
+          {/* Tombol Atur Logo Sekolah & TTD Kepala Sekolah */}
+          <button
+            onClick={() => setIsBrandingModalOpen(true)}
+            className="flex items-center justify-center gap-1.5 px-3 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
+            title="Unggah Logo Sekolah, Logo Tut Wuri Handayani, dan Tanda Tangan / Barcode Kepala Sekolah"
+          >
+            <i className="fa-solid fa-stamp text-xs"></i>
+            <span>Logo & TTD Kepsek</span>
           </button>
 
           {/* Jurnal Karakter & Poin Siswa Shortcut Button */}
@@ -1485,6 +1497,7 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
               localStorage.setItem('absensi_default_card_template', templateId);
             }
           }}
+          onUpdateSettings={onUpdateSettings}
           onClose={() => setCardStudent(null)}
         />
       )}
@@ -1504,10 +1517,25 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
               localStorage.setItem('absensi_default_card_template', templateId);
             }
           }}
+          onUpdateSettings={onUpdateSettings}
           onClose={() => {
             setIsBulkPrintModalOpen(false);
             setBulkPrintSelectedIds(undefined);
           }}
+        />
+      )}
+
+      {/* Modal Branding Kartu Siswa: Logo & TTD Kepala Sekolah */}
+      {isBrandingModalOpen && (
+        <CardBrandingModal
+          isOpen={isBrandingModalOpen}
+          settings={settings}
+          onUpdateSettings={(updated) => {
+            if (onUpdateSettings) {
+              onUpdateSettings(updated);
+            }
+          }}
+          onClose={() => setIsBrandingModalOpen(false)}
         />
       )}
 

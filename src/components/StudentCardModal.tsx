@@ -8,13 +8,16 @@ import {
   CR80_WIDTH_MM,
   CR80_HEIGHT_MM,
   drawCR80CardPDF,
+  prepareCardAssets,
 } from '../utils/studentCardTemplates';
 import { CR80StudentCard } from './CR80StudentCard';
+import { CardBrandingModal } from './CardBrandingModal';
 
 interface StudentCardModalProps {
   student: Student;
   settings: SystemSettings;
   onSaveDefaultTemplate?: (templateId: CardTemplateId) => void;
+  onUpdateSettings?: (updated: SystemSettings) => void;
   onClose: () => void;
 }
 
@@ -22,6 +25,7 @@ export const StudentCardModal: React.FC<StudentCardModalProps> = ({
   student,
   settings,
   onSaveDefaultTemplate,
+  onUpdateSettings,
   onClose,
 }) => {
   const [selectedTemplate, setSelectedTemplate] = useState<CardTemplateId>(() => {
@@ -30,6 +34,7 @@ export const StudentCardModal: React.FC<StudentCardModalProps> = ({
   const [showLanyard, setShowLanyard] = useState<boolean>(true);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [isExportingPDF, setIsExportingPDF] = useState<boolean>(false);
+  const [isBrandingModalOpen, setIsBrandingModalOpen] = useState<boolean>(false);
   const [toastMsg, setToastMsg] = useState<string>('');
 
   useEffect(() => {
@@ -122,6 +127,9 @@ export const StudentCardModal: React.FC<StudentCardModalProps> = ({
         { align: 'center' }
       );
 
+      // Pre-rasterize left logo, right logo, and signature to clean PNG data URLs for jsPDF
+      const cardAssets = await prepareCardAssets(settings);
+
       drawCR80CardPDF(
         doc,
         x,
@@ -133,7 +141,8 @@ export const StudentCardModal: React.FC<StudentCardModalProps> = ({
         photoDataUrl,
         qrDataUrl,
         selectedTemplate,
-        false
+        false,
+        cardAssets
       );
 
       // Scissors cutting guide
@@ -243,8 +252,18 @@ export const StudentCardModal: React.FC<StudentCardModalProps> = ({
               </button>
             </div>
 
-            {/* Set As Default button */}
+            {/* Set As Default & Branding buttons */}
             <div className="shrink-0 flex items-center gap-2 w-full sm:w-auto justify-end">
+              <button
+                type="button"
+                onClick={() => setIsBrandingModalOpen(true)}
+                className="px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                title="Unggah logo sekolah dan tanda tangan / barcode kepala sekolah"
+              >
+                <i className="fa-solid fa-stamp text-amber-600 dark:text-amber-400" />
+                <span>Upload Logo & TTD</span>
+              </button>
+
               {isCurrentDefault ? (
                 <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                   <i className="fa-solid fa-star text-amber-500" />
@@ -328,14 +347,26 @@ export const StudentCardModal: React.FC<StudentCardModalProps> = ({
         </div>
 
         {/* Action Buttons */}
-        <div className="p-4 sm:p-5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between bg-white dark:bg-slate-900 no-print">
-          <button
-            onClick={handleDownloadQR}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
-          >
-            <i className="fa-solid fa-download text-indigo-600 dark:text-indigo-400"></i>
-            <span>Unduh File QR</span>
-          </button>
+        <div className="p-4 sm:p-5 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900 no-print">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownloadQR}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
+            >
+              <i className="fa-solid fa-download text-indigo-600 dark:text-indigo-400"></i>
+              <span>Unduh File QR</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsBrandingModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 text-xs font-bold rounded-xl border border-amber-300 dark:border-amber-700 transition-all cursor-pointer shadow-2xs"
+              title="Unggah Logo Sekolah, Tut Wuri Handayani, dan TTD Kepala Sekolah agar muncul jelas di hasil download PDF"
+            >
+              <i className="fa-solid fa-stamp text-amber-600 dark:text-amber-400"></i>
+              <span>Upload Logo & TTD</span>
+            </button>
+          </div>
 
           <div className="flex items-center gap-2">
             <button
@@ -356,6 +387,22 @@ export const StudentCardModal: React.FC<StudentCardModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Modal Upload Logo & Tanda Tangan Kepsek */}
+      {isBrandingModalOpen && (
+        <CardBrandingModal
+          isOpen={isBrandingModalOpen}
+          settings={settings}
+          onUpdateSettings={(updated) => {
+            if (onUpdateSettings) {
+              onUpdateSettings(updated);
+            }
+            setToastMsg('Logo & TTD Kepsek berhasil diperbarui!');
+            setTimeout(() => setToastMsg(''), 3000);
+          }}
+          onClose={() => setIsBrandingModalOpen(false)}
+        />
+      )}
     </div>
   );
 };

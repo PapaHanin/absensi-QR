@@ -162,9 +162,18 @@ export const CR80StudentCard: React.FC<CR80StudentCardProps> = ({
             {/* KOP RESMI SEKOLAH (LANDSCAPE) */}
             <div className="relative z-10 pt-0.5 pb-1">
               <div className="flex items-center justify-between gap-2 px-1">
-                {/* Logo Resmi Sekolah SDN Kecil Ogomojolo */}
-                <div className="shrink-0">
-                  <SchoolLogo size={32} title="Logo Resmi SDN Kecil Ogomojolo" />
+                {/* Logo Resmi Sekolah */}
+                <div className="shrink-0 flex items-center justify-center">
+                  {settings.schoolLogoUrl ? (
+                    <img
+                      src={settings.schoolLogoUrl}
+                      alt="Logo Sekolah"
+                      className="w-8 h-8 object-contain"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <SchoolLogo size={32} title="Logo Resmi SDN Kecil Ogomojolo" />
+                  )}
                 </div>
 
                 {/* Teks KOP Instansi */}
@@ -180,9 +189,18 @@ export const CR80StudentCard: React.FC<CR80StudentCardProps> = ({
                   </p>
                 </div>
 
-                {/* Logo Tut Wuri Handayani */}
-                <div className="shrink-0">
-                  <TutWuriHandayaniLogo size={32} />
+                {/* Logo Tut Wuri Handayani / Kanan */}
+                <div className="shrink-0 flex items-center justify-center">
+                  {settings.tutWuriLogoUrl ? (
+                    <img
+                      src={settings.tutWuriLogoUrl}
+                      alt="Logo Pendamping"
+                      className="w-8 h-8 object-contain"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <TutWuriHandayaniLogo size={32} />
+                  )}
                 </div>
               </div>
 
@@ -313,13 +331,26 @@ export const CR80StudentCard: React.FC<CR80StudentCardProps> = ({
                     </p>
                   </div>
 
-                  {/* TTE Barcode */}
+                  {/* TTE Barcode / TTD Kepsek */}
                   <div className="shrink-0 flex flex-col items-center pl-1">
-                    <HeadmasterBarcode
-                      customBarcodeUrl={settings.headmasterBarcodeUrl}
-                      size={26}
-                    />
-                    <span className="text-[5px] font-bold text-blue-900 mt-0.5">TTE RESMI</span>
+                    {settings.headmasterSignatureUrl ? (
+                      <div className="h-6.5 max-w-[52px] flex items-center justify-center">
+                        <img
+                          src={settings.headmasterSignatureUrl}
+                          alt="TTD Kepala Sekolah"
+                          className="max-h-6.5 max-w-[52px] object-contain"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    ) : (
+                      <HeadmasterBarcode
+                        customBarcodeUrl={settings.headmasterBarcodeUrl}
+                        size={26}
+                      />
+                    )}
+                    <span className="text-[5px] font-bold text-blue-900 mt-0.5">
+                      {settings.headmasterSignatureUrl ? 'TTD RESMI' : 'TTE RESMI'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -375,8 +406,17 @@ export const CR80StudentCard: React.FC<CR80StudentCardProps> = ({
             {/* Top Emerald Header Ribbon */}
             <div className="relative z-10 -mx-2 -mt-2 bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 text-white px-2 py-1.5 shadow-xs">
               <div className="flex items-center justify-between gap-2">
-                <div className="shrink-0 p-0.5 bg-white/10 rounded border border-amber-300/40">
-                  <SchoolLogo size={30} title="Logo Resmi SDN Kecil Ogomojolo" />
+                <div className="shrink-0 p-0.5 bg-white/10 rounded border border-amber-300/40 flex items-center justify-center">
+                  {settings.schoolLogoUrl ? (
+                    <img
+                      src={settings.schoolLogoUrl}
+                      alt="Logo Sekolah"
+                      className="w-7 h-7 object-contain"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <SchoolLogo size={30} title="Logo Resmi SDN Kecil Ogomojolo" />
+                  )}
                 </div>
 
                 <div className="flex-1 text-center min-w-0 px-1">
@@ -391,8 +431,17 @@ export const CR80StudentCard: React.FC<CR80StudentCardProps> = ({
                   </p>
                 </div>
 
-                <div className="shrink-0 p-0.5 bg-white/10 rounded border border-amber-300/40">
-                  <TutWuriHandayaniLogo size={30} />
+                <div className="shrink-0 p-0.5 bg-white/10 rounded border border-amber-300/40 flex items-center justify-center">
+                  {settings.tutWuriLogoUrl ? (
+                    <img
+                      src={settings.tutWuriLogoUrl}
+                      alt="Logo Pendamping"
+                      className="w-7 h-7 object-contain"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <TutWuriHandayaniLogo size={30} />
+                  )}
                 </div>
               </div>
 
@@ -522,11 +571,24 @@ export const CR80StudentCard: React.FC<CR80StudentCardProps> = ({
                   </div>
 
                   <div className="shrink-0 flex flex-col items-center pl-1">
-                    <HeadmasterBarcode
-                      customBarcodeUrl={settings.headmasterBarcodeUrl}
-                      size={26}
-                    />
-                    <span className="text-[5px] font-bold text-emerald-900 mt-0.5">TTE DIGITAL</span>
+                    {settings.headmasterSignatureUrl ? (
+                      <div className="h-6.5 max-w-[52px] flex items-center justify-center">
+                        <img
+                          src={settings.headmasterSignatureUrl}
+                          alt="TTD Kepala Sekolah"
+                          className="max-h-6.5 max-w-[52px] object-contain"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    ) : (
+                      <HeadmasterBarcode
+                        customBarcodeUrl={settings.headmasterBarcodeUrl}
+                        size={26}
+                      />
+                    )}
+                    <span className="text-[5px] font-bold text-emerald-900 mt-0.5">
+                      {settings.headmasterSignatureUrl ? 'TTD RESMI' : 'TTE DIGITAL'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -581,8 +643,17 @@ export const CR80StudentCard: React.FC<CR80StudentCardProps> = ({
             {/* Top Dark Slate Banner */}
             <div className="relative z-10 -mx-2 -mt-2 bg-gradient-to-r from-slate-950 via-slate-900 to-cyan-950 text-white px-2 py-1.5 shadow-xs">
               <div className="flex items-center justify-between gap-2">
-                <div className="shrink-0 p-0.5 bg-white/10 rounded border border-cyan-400/40">
-                  <SchoolLogo size={30} title="Logo Resmi SDN Kecil Ogomojolo" />
+                <div className="shrink-0 p-0.5 bg-white/10 rounded border border-cyan-400/40 flex items-center justify-center">
+                  {settings.schoolLogoUrl ? (
+                    <img
+                      src={settings.schoolLogoUrl}
+                      alt="Logo Sekolah"
+                      className="w-7 h-7 object-contain"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <SchoolLogo size={30} title="Logo Resmi SDN Kecil Ogomojolo" />
+                  )}
                 </div>
 
                 <div className="flex-1 text-center min-w-0 px-1">
@@ -597,8 +668,17 @@ export const CR80StudentCard: React.FC<CR80StudentCardProps> = ({
                   </p>
                 </div>
 
-                <div className="shrink-0 p-0.5 bg-white/10 rounded border border-cyan-400/40">
-                  <TutWuriHandayaniLogo size={30} />
+                <div className="shrink-0 p-0.5 bg-white/10 rounded border border-cyan-400/40 flex items-center justify-center">
+                  {settings.tutWuriLogoUrl ? (
+                    <img
+                      src={settings.tutWuriLogoUrl}
+                      alt="Logo Pendamping"
+                      className="w-7 h-7 object-contain"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <TutWuriHandayaniLogo size={30} />
+                  )}
                 </div>
               </div>
 
@@ -729,11 +809,24 @@ export const CR80StudentCard: React.FC<CR80StudentCardProps> = ({
                   </div>
 
                   <div className="shrink-0 flex flex-col items-center pl-1">
-                    <HeadmasterBarcode
-                      customBarcodeUrl={settings.headmasterBarcodeUrl}
-                      size={26}
-                    />
-                    <span className="text-[5px] font-bold text-cyan-900 mt-0.5">TTE DIGITAL</span>
+                    {settings.headmasterSignatureUrl ? (
+                      <div className="h-6.5 max-w-[52px] flex items-center justify-center">
+                        <img
+                          src={settings.headmasterSignatureUrl}
+                          alt="TTD Kepala Sekolah"
+                          className="max-h-6.5 max-w-[52px] object-contain"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    ) : (
+                      <HeadmasterBarcode
+                        customBarcodeUrl={settings.headmasterBarcodeUrl}
+                        size={26}
+                      />
+                    )}
+                    <span className="text-[5px] font-bold text-cyan-900 mt-0.5">
+                      {settings.headmasterSignatureUrl ? 'TTD RESMI' : 'TTE DIGITAL'}
+                    </span>
                   </div>
                 </div>
               </div>

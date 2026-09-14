@@ -154,7 +154,7 @@ export const SDN_KECIL_OGOMOJOLO_LOGO_SVG = `<svg viewBox="0 0 200 200" xmlns="h
  * Incorporates the 29x29 QR code matrix with the SDN Kecil Ogomojolo emblem in the center.
  */
 export const HEADMASTER_DEFAULT_BARCODE_SVG = `
-<svg viewBox="0 0 340 340" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 340 340" width="340" height="340" xmlns="http://www.w3.org/2000/svg">
   <!-- White clean background with quiet margin -->
   <rect width="340" height="340" fill="#ffffff" rx="16" />
 
@@ -303,7 +303,9 @@ export const HEADMASTER_DEFAULT_BARCODE_SVG = `
  * Suitable for img src and jsPDF embedding.
  */
 export const HEADMASTER_DEFAULT_BARCODE_DATA_URI =
-  'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(HEADMASTER_DEFAULT_BARCODE_SVG);
+  typeof window !== 'undefined' && window.btoa
+    ? `data:image/svg+xml;base64,${window.btoa(unescape(encodeURIComponent(HEADMASTER_DEFAULT_BARCODE_SVG)))}`
+    : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(HEADMASTER_DEFAULT_BARCODE_SVG)}`;
 
 let cachedBarcodePng: string | null = null;
 
@@ -311,35 +313,54 @@ let cachedBarcodePng: string | null = null;
  * Rasterizes the Barcode SVG to a high-resolution PNG Data URL for jsPDF compatibility.
  */
 export const getHeadmasterBarcodePNG = async (customBarcodeUrl?: string): Promise<string> => {
-  if (customBarcodeUrl && customBarcodeUrl.startsWith('data:image')) {
-    return customBarcodeUrl;
+  if (customBarcodeUrl) {
+    if (
+      customBarcodeUrl.startsWith('data:image/png') ||
+      customBarcodeUrl.startsWith('data:image/jpeg') ||
+      customBarcodeUrl.startsWith('data:image/webp')
+    ) {
+      return customBarcodeUrl;
+    }
+  } else if (cachedBarcodePng) {
+    return cachedBarcodePng;
   }
-  if (cachedBarcodePng) return cachedBarcodePng;
+
+  const srcToLoad = customBarcodeUrl || HEADMASTER_DEFAULT_BARCODE_DATA_URI;
 
   return new Promise((resolve) => {
+    if (typeof window === 'undefined') {
+      return resolve('');
+    }
     const img = new Image();
     img.crossOrigin = 'Anonymous';
     img.onload = () => {
       try {
         const canvas = document.createElement('canvas');
-        canvas.width = 340;
-        canvas.height = 340;
+        const w = img.naturalWidth || 340;
+        const h = img.naturalHeight || 340;
+        canvas.width = w;
+        canvas.height = h;
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, 340, 340);
-          ctx.drawImage(img, 0, 0, 340, 340);
-          cachedBarcodePng = canvas.toDataURL('image/png');
-          resolve(cachedBarcodePng);
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          const pngUrl = canvas.toDataURL('image/png');
+          if (!customBarcodeUrl) {
+            cachedBarcodePng = pngUrl;
+          }
+          resolve(pngUrl);
         } else {
-          resolve(HEADMASTER_DEFAULT_BARCODE_DATA_URI);
+          resolve('');
         }
       } catch {
-        resolve(HEADMASTER_DEFAULT_BARCODE_DATA_URI);
+        resolve('');
       }
     };
-    img.onerror = () => resolve(HEADMASTER_DEFAULT_BARCODE_DATA_URI);
-    img.src = customBarcodeUrl || HEADMASTER_DEFAULT_BARCODE_DATA_URI;
+    img.onerror = () => {
+      resolve('');
+    };
+    img.src = srcToLoad;
   });
 };
 

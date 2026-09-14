@@ -7,6 +7,7 @@ import {
   CR80_WIDTH_MM,
   CR80_HEIGHT_MM,
   drawCR80CardPDF,
+  prepareCardAssets,
 } from '../utils/studentCardTemplates';
 import { CR80StudentCard } from './CR80StudentCard';
 import { createStudentQRPayload, generateQRCodeDataURL } from '../utils/qr';
@@ -121,6 +122,9 @@ export const CardTemplateSelectionModal: React.FC<CardTemplateSelectionModalProp
       const startY = 32;
       const gapY = 22;
 
+      // Pre-rasterize left logo, right logo, and signature to clean PNG data URLs for jsPDF
+      const cardAssets = await prepareCardAssets(settings);
+
       for (let i = 0; i < templates.length; i++) {
         const tKey = templates[i];
         const cardY = startY + i * (cardH + gapY);
@@ -136,7 +140,8 @@ export const CardTemplateSelectionModal: React.FC<CardTemplateSelectionModalProp
           undefined,
           qrMap[tKey],
           tKey,
-          previewMode === 'sample'
+          previewMode === 'sample',
+          cardAssets
         );
 
         // Label above each card
