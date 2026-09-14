@@ -3,7 +3,7 @@ import autoTable from 'jspdf-autotable';
 import { AttendanceRecord, SystemSettings } from '../types';
 import { formatCleanNIP } from './classUtils';
 
-interface PDFReportOptions {
+export interface PDFReportOptions {
   records: AttendanceRecord[];
   dateRangeLabel: string;
   selectedClass: string;
@@ -25,6 +25,8 @@ interface PDFReportOptions {
     nip?: string;
   };
   signatureDate?: string;
+  directPrint?: boolean;
+  filterSummary?: string;
 }
 
 export const generateAttendancePDFReport = ({
@@ -36,6 +38,8 @@ export const generateAttendancePDFReport = ({
   homeroomTeacher,
   headmaster,
   signatureDate,
+  directPrint = false,
+  filterSummary,
 }: PDFReportOptions) => {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -71,19 +75,31 @@ export const generateAttendancePDFReport = ({
   let startY = 32;
   doc.text(`Periode Laporan: ${dateRangeLabel}`, 14, startY);
   doc.text(`Kelas Filter: ${selectedClass}`, 14, startY + 5);
-  doc.text(`Jam Batas Masuk: ${settings.lateCutoffTime} WIB`, 14, startY + 10);
+  doc.text(
+    `Jam Masuk: ${settings.lateCutoffTime} WIB${filterSummary ? ` | ${filterSummary}` : ''}`,
+    14,
+    startY + 10
+  );
+
+  // Dynamic statistics from the actual exported records to prevent discrepancies
+  const recHadir = records.filter((r) => r.status === 'Hadir').length;
+  const recTerlambat = records.filter((r) => r.status === 'Terlambat').length;
+  const recIzin = records.filter((r) => r.status === 'Izin').length;
+  const recSakit = records.filter((r) => r.status === 'Sakit').length;
+  const recAlpa = records.filter((r) => r.status === 'Alpa').length;
+  const recIzinSakit = recIzin + recSakit;
 
   // Stats Box on the right
   const rightX = pageWidth - 14;
   doc.setFontSize(9);
   doc.text(
-    `Hadir: ${stats.hadir} | Terlambat: ${stats.terlambat} | Izin/Sakit: ${stats.izinSakit} | Alpa: ${stats.alpa}`,
+    `Hadir: ${recHadir} | Terlambat: ${recTerlambat} | Izin/Sakit: ${recIzinSakit} | Alpa: ${recAlpa}`,
     rightX,
     startY,
     { align: 'right' }
   );
   doc.text(
-    `Total Entri Terdata: ${records.length} Record`,
+    `Total Data Tercetak: ${records.length} Siswa`,
     rightX,
     startY + 5,
     { align: 'right' }
@@ -98,12 +114,12 @@ export const generateAttendancePDFReport = ({
   const uniqueDates = new Set(records.map((r) => r.date));
   const isMultiDay = uniqueDates.size > 1;
 
-  // Table Columns & Rows
+  // Table Columns & Rows with Guru Pengabsen
   let tableHeaders: string[][];
   let tableRows: (string | number)[][];
 
   if (isMultiDay) {
-    tableHeaders = [['No', 'Tgl', 'Jam', 'NIS', 'Nama Siswa', 'Kelas', 'Status', 'Metode', 'Keterangan']];
+    tableHeaders = [['No', 'Tgl', 'Jam', 'NIS', 'Nama Siswa', 'Kelas', 'Status', 'Guru Pengabsen', 'Metode', 'Keterangan']];
     tableRows = records.map((rec, index) => [
       index + 1,
       rec.date,
@@ -112,11 +128,12 @@ export const generateAttendancePDFReport = ({
       rec.studentName,
       rec.classRoom,
       rec.status,
-      rec.scannedVia,
+      (rec as unknown as { teacherDisplay?: string }).teacherDisplay || rec.teacherName || 'Wali Kelas',
+      rec.scannedVia || 'QR Camera',
       rec.note || '-',
     ]);
   } else {
-    tableHeaders = [['No', 'Jam', 'NIS', 'Nama Siswa', 'Kelas', 'Status', 'Metode', 'Keterangan']];
+    tableHeaders = [['No', 'Jam', 'NIS', 'Nama Siswa', 'Kelas', 'Status', 'Guru Pengabsen', 'Metode', 'Keterangan']];
     tableRows = records.map((rec, index) => [
       index + 1,
       rec.time,
@@ -124,7 +141,8 @@ export const generateAttendancePDFReport = ({
       rec.studentName,
       rec.classRoom,
       rec.status,
-      rec.scannedVia,
+      (rec as unknown as { teacherDisplay?: string }).teacherDisplay || rec.teacherName || 'Wali Kelas',
+      rec.scannedVia || 'QR Camera',
       rec.note || '-',
     ]);
   }
@@ -138,38 +156,40 @@ export const generateAttendancePDFReport = ({
       fillColor: [79, 70, 229], // Indigo-600
       textColor: [255, 255, 255],
       fontStyle: 'bold',
-      fontSize: 8.5,
+      fontSize: 8.0,
       halign: 'center',
     },
     bodyStyles: {
-      fontSize: 8,
+      fontSize: 7.5,
       textColor: [30, 41, 59],
     },
     columnStyles: isMultiDay
       ? {
-          0: { cellWidth: 8, halign: 'center' },
-          1: { cellWidth: 20, halign: 'center' },
-          2: { cellWidth: 15, halign: 'center' },
-          3: { cellWidth: 18, halign: 'center' },
-          4: { cellWidth: 42 },
-          5: { cellWidth: 14, halign: 'center' },
-          6: { cellWidth: 20, halign: 'center' },
-          7: { cellWidth: 18, halign: 'center' },
-          8: { cellWidth: 'auto' },
+          0: { cellWidth: 7, halign: 'center' },
+          1: { cellWidth: 16, halign: 'center' },
+          2: { cellWidth: 13, halign: 'center' },
+          3: { cellWidth: 15, halign: 'center' },
+          4: { cellWidth: 35 },
+          5: { cellWidth: 12, halign: 'center' },
+          6: { cellWidth: 16, halign: 'center' },
+          7: { cellWidth: 30 },
+          8: { cellWidth: 16, halign: 'center' },
+          9: { cellWidth: 'auto' },
         }
       : {
-          0: { cellWidth: 10, halign: 'center' },
-          1: { cellWidth: 18, halign: 'center' },
-          2: { cellWidth: 20, halign: 'center' },
-          3: { cellWidth: 50 },
-          4: { cellWidth: 16, halign: 'center' },
-          5: { cellWidth: 22, halign: 'center' },
-          6: { cellWidth: 22, halign: 'center' },
-          7: { cellWidth: 'auto' },
+          0: { cellWidth: 8, halign: 'center' },
+          1: { cellWidth: 15, halign: 'center' },
+          2: { cellWidth: 18, halign: 'center' },
+          3: { cellWidth: 40 },
+          4: { cellWidth: 14, halign: 'center' },
+          5: { cellWidth: 18, halign: 'center' },
+          6: { cellWidth: 32 },
+          7: { cellWidth: 18, halign: 'center' },
+          8: { cellWidth: 'auto' },
         },
     didParseCell: function (data) {
       // Highlight Status column
-      const statusColIndex = isMultiDay ? 6 : 5;
+      const statusColIndex = 6;
       if (data.section === 'body' && data.column.index === statusColIndex) {
         const val = String(data.cell.raw);
         if (val === 'Hadir') {
@@ -257,12 +277,19 @@ export const generateAttendancePDFReport = ({
   doc.setFont('helvetica', 'normal');
   doc.text(headNip, sigRightX, sigY + 40);
 
-  // Save the PDF
+  // Save or Direct Print the PDF
   const safeSchool = settings.schoolName.replace(/[\s\/\\]+/g, '_');
   const safeRange = dateRangeLabel.replace(/[\s\/\\]+/g, '_');
   const safeClass = selectedClass.replace(/[\s\/\\]+/g, '_');
   const filename = `Laporan_Presensi_${safeSchool}_${safeRange}_Kelas_${safeClass}.pdf`;
-  doc.save(filename);
+
+  if (directPrint) {
+    doc.autoPrint();
+    const pdfBlob = doc.output('bloburl');
+    window.open(pdfBlob, '_blank');
+  } else {
+    doc.save(filename);
+  }
 };
 
 export interface MonthlyStudentRecapItem {
@@ -294,6 +321,7 @@ export interface MonthlyPDFReportOptions {
     nip?: string;
   };
   signatureDate?: string;
+  directPrint?: boolean;
 }
 
 /**
@@ -308,6 +336,7 @@ export const generateMonthlyAttendancePDFReport = ({
   homeroomTeacher,
   headmaster,
   signatureDate,
+  directPrint = false,
 }: MonthlyPDFReportOptions) => {
   const doc = new jsPDF({
     orientation: 'landscape',
@@ -554,5 +583,12 @@ export const generateMonthlyAttendancePDFReport = ({
   const safeMonth = monthLabel.replace(/[\s\/\\]+/g, '_');
   const safeClass = selectedClass.replace(/[\s\/\\]+/g, '_');
   const filename = `Rekapitulasi_Bulanan_${safeSchool}_${safeMonth}_Kelas_${safeClass}.pdf`;
-  doc.save(filename);
+
+  if (directPrint) {
+    doc.autoPrint();
+    const pdfBlob = doc.output('bloburl');
+    window.open(pdfBlob, '_blank');
+  } else {
+    doc.save(filename);
+  }
 };

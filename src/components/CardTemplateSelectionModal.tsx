@@ -94,44 +94,41 @@ export const CardTemplateSelectionModal: React.FC<CardTemplateSelectionModalProp
         format: 'a4',
       });
 
-      // Place 3 cards side by side / grid on A4 (CR80: 53.98 x 85.60 mm)
-      // Card width 53.98, Card height 85.60
-      // 3 cards side-by-side: 3 * 53.98 = 161.94 mm. Left margin = (210 - 161.94) / 2 = ~24 mm
-      const cardW = CR80_WIDTH_MM;
-      const cardH = CR80_HEIGHT_MM;
+      // Place 3 landscape cards vertically on A4 (CR80: 85.60 x 53.98 mm)
+      const cardW = CR80_WIDTH_MM; // 85.60 mm
+      const cardH = CR80_HEIGHT_MM; // 53.98 mm
+      const cardX = (210 - cardW) / 2; // 62.2 mm (horizontally centered)
       const templates: CardTemplateId[] = ['seraphic', 'nusantara', 'pelita'];
 
       // Title on A4 page
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(14);
+      doc.setFontSize(13);
       doc.setTextColor(15, 23, 42);
-      doc.text('3 CONTOH KARTU PRESENSI SISWA (STANDAR CR80: 85,60 x 53,98 mm)', 105, 18, {
+      doc.text('3 CONTOH KARTU PRESENSI SISWA STANDAR CR80 LANDSCAPE (85,60 x 53,98 mm)', 105, 16, {
         align: 'center',
       });
 
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
+      doc.setFontSize(8.5);
       doc.setTextColor(100, 116, 139);
       doc.text(
         `Template Default Aktif: ${CARD_TEMPLATES[selectedTemplate].name} | ${settings.schoolName}`,
         105,
-        24,
+        22,
         { align: 'center' }
       );
 
       const startY = 32;
-      const gapX = 10;
-      const totalWidth = 3 * cardW + 2 * gapX;
-      const startX = (210 - totalWidth) / 2;
+      const gapY = 22;
 
       for (let i = 0; i < templates.length; i++) {
         const tKey = templates[i];
-        const cardX = startX + i * (cardW + gapX);
+        const cardY = startY + i * (cardH + gapY);
 
         drawCR80CardPDF(
           doc,
           cardX,
-          startY,
+          cardY,
           cardW,
           cardH,
           firstRealStudent,
@@ -144,26 +141,35 @@ export const CardTemplateSelectionModal: React.FC<CardTemplateSelectionModalProp
 
         // Label above each card
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8);
+        doc.setFontSize(8.5);
         doc.setTextColor(30, 41, 59);
-        const label = i === 0 ? 'KARTU 1 (KIRI)' : i === 1 ? 'KARTU 2 (TENGAH)' : 'KARTU 3 (KANAN)';
-        doc.text(label, cardX + cardW / 2, startY - 2.5, { align: 'center' });
+        const label =
+          i === 0
+            ? 'CONTOH 1: STANDAR NASIONAL (BIRU KEMDIKBUD)'
+            : i === 1
+            ? 'CONTOH 2: KLASIK HIJAU ZAMRUD'
+            : 'CONTOH 3: SMART CARD KONTEMPORER';
+        doc.text(label, 105, cardY - 2.5, { align: 'center' });
 
         if (tKey === selectedTemplate) {
           doc.setTextColor(22, 163, 74);
-          doc.text('(DEFAULT AKTIF)', cardX + cardW / 2, startY + cardH + 4, { align: 'center' });
+          doc.setFontSize(7.5);
+          doc.text('★ TEMPLATE DEFAULT AKTIF SEKOLAH ★', 105, cardY + cardH + 4, { align: 'center' });
         }
       }
 
       // Bottom Cutting note
       doc.setFont('helvetica', 'italic');
-      doc.setFontSize(8);
+      doc.setFontSize(7.5);
       doc.setTextColor(148, 163, 184);
-      doc.text('Gunting mengikuti garis tepi kartu sesuai ukuran standar kartu PVC ISO CR80.', 105, startY + cardH + 12, {
-        align: 'center',
-      });
+      doc.text(
+        'Gunting mengikuti garis tepi kartu sesuai ukuran standar kartu PVC ISO CR80 Landscape.',
+        105,
+        286,
+        { align: 'center' }
+      );
 
-      doc.save(`3_Contoh_Desain_Kartu_CR80_${settings.schoolName.replace(/\s+/g, '_')}.pdf`);
+      doc.save(`3_Contoh_Desain_Kartu_CR80_Landscape_${settings.schoolName.replace(/\s+/g, '_')}.pdf`);
     } catch (err) {
       console.error('PDF export error:', err);
       alert('Gagal mengekspor PDF contoh kartu.');
@@ -178,7 +184,7 @@ export const CardTemplateSelectionModal: React.FC<CardTemplateSelectionModalProp
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-6xl w-full flex flex-col shadow-2xl relative my-auto animate-scale-up overflow-hidden max-h-[96vh]">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-7xl w-full flex flex-col shadow-2xl relative my-auto animate-scale-up overflow-hidden max-h-[96vh]">
         {/* Modal Header */}
         <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-50/90 dark:bg-slate-850 no-print">
           <div className="flex items-center gap-3">
@@ -188,14 +194,14 @@ export const CardTemplateSelectionModal: React.FC<CardTemplateSelectionModalProp
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
-                  Pilih Template Kartu Siswa & Absensi (Ukuran 85,60 × 53,98 mm)
+                  Pilih Template Kartu Siswa & Absensi Standar CR80 Landscape (85,60 × 53,98 mm)
                 </h3>
                 <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 text-[10px] font-black tracking-wide border border-emerald-300 dark:border-emerald-700">
-                  CR80 STANDAR ISO
+                  CR80 LANDSCAPE
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Pilih salah satu dari 3 desain berikut untuk dijadikan <strong>default cetak</strong> kartu siswa di sekolah Anda.
+                Pilih salah satu dari 3 desain kartu landscape berikut dengan QR code ekstra besar untuk kemudahan scan absensi di sekolah Anda.
               </p>
             </div>
           </div>
@@ -295,7 +301,7 @@ export const CardTemplateSelectionModal: React.FC<CardTemplateSelectionModalProp
 
           <div
             id="cards-showcase-printable"
-            className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8 items-start justify-center max-w-5xl mx-auto"
+            className="grid grid-cols-1 xl:grid-cols-3 gap-6 lg:gap-8 items-start justify-center max-w-7xl mx-auto"
           >
             {/* ======================================================== */}
             {/* 1. KARTU KIRI: SERAPHIC ACADEMY                          */}

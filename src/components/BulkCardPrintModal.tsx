@@ -229,7 +229,7 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
     window.print();
   };
 
-  // Export to Vector PDF (CR80: 9 Cards per A4 Page in 3x3 layout)
+  // Export to Vector PDF (CR80: 8 Landscape Cards per A4 Page in 2x4 layout)
   const handleExportPDF = async () => {
     if (printableStudents.length === 0) return;
     setIsExportingPDF(true);
@@ -241,22 +241,22 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
         format: 'a4',
       });
 
-      // 9 CR80 Cards per A4 Page Layout: 3 columns x 3 rows
-      const cardsPerPage = 9;
-      const cardWidth = CR80_WIDTH_MM; // 53.98 mm
-      const cardHeight = CR80_HEIGHT_MM; // 85.60 mm
+      // 8 CR80 Landscape Cards per A4 Page Layout: 2 columns x 4 rows
+      const cardsPerPage = 8;
+      const cardWidth = CR80_WIDTH_MM; // 85.60 mm
+      const cardHeight = CR80_HEIGHT_MM; // 53.98 mm
 
-      // Spacing calculations:
-      // A4 = 210 x 297 mm
-      // 3 * 53.98 = 161.94 mm. Total horizontal margin = 48.06 mm.
-      // GapX = 6 mm. Left margin = (210 - (3 * 53.98 + 2 * 6)) / 2 = 18.03 mm
-      const gapX = 6;
-      const marginX = (210 - (3 * cardWidth + 2 * gapX)) / 2;
+      // Spacing calculations for A4 (210 x 297 mm):
+      // 2 * 85.60 = 171.20 mm. Total horizontal margin = 38.8 mm.
+      // GapX = 8 mm. Left margin = (210 - (2 * 85.60 + 8)) / 2 = 15.4 mm
+      const gapX = 8;
+      const marginX = (210 - (2 * cardWidth + gapX)) / 2;
 
-      // 3 * 85.60 = 256.8 mm. Total vertical margin = 40.2 mm.
-      // GapY = 4.5 mm. Top margin = (297 - (3 * 85.60 + 2 * 4.5)) / 2 = 15.6 mm
-      const gapY = 4.5;
-      const marginY = (297 - (3 * cardHeight + 2 * gapY)) / 2;
+      // 4 * 53.98 = 215.92 mm. Total vertical margin = 81.08 mm.
+      // GapY = 8 mm. 3 gaps = 24 mm.
+      // Top margin = (297 - (4 * 53.98 + 3 * 8)) / 2 = 28.54 mm
+      const gapY = 8;
+      const marginY = (297 - (4 * cardHeight + 3 * gapY)) / 2;
 
       for (let i = 0; i < printableStudents.length; i++) {
         const student = printableStudents[i];
@@ -266,8 +266,8 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
           doc.addPage();
         }
 
-        const col = slotIndex % 3;
-        const row = Math.floor(slotIndex / 3);
+        const col = slotIndex % 2;
+        const row = Math.floor(slotIndex / 2);
         const x = marginX + col * (cardWidth + gapX);
         const y = marginY + row * (cardHeight + gapY);
 
@@ -285,27 +285,27 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
           false
         );
 
-        // Cutting Guideline Marks (Dashed light grey lines)
+        // Cutting Guideline Marks (Dashed light grey lines between cards)
         doc.setDrawColor(203, 213, 225);
         doc.setLineWidth(0.18);
         doc.setLineDashPattern([1.5, 2], 0);
 
-        // Vertical divider between columns
-        if (col < 2) {
+        // Vertical divider between column 0 and 1
+        if (col === 0) {
           const cutX = x + cardWidth + gapX / 2;
-          doc.line(cutX, y - 1.5, cutX, y + cardHeight + 1.5);
+          doc.line(cutX, y - 2, cutX, y + cardHeight + 2);
         }
         // Horizontal divider between rows
-        if (row < 2) {
+        if (row < 3) {
           const cutY = y + cardHeight + gapY / 2;
-          doc.line(x - 1.5, cutY, x + cardWidth + 1.5, cutY);
+          doc.line(x - 2, cutY, x + cardWidth + 2, cutY);
         }
         doc.setLineDashPattern([], 0);
       }
 
       const safeClass = selectedClass.replace(/\s+/g, '_');
       const safeSchool = settings.schoolName.replace(/\s+/g, '_');
-      doc.save(`Kartu_Presensi_CR80_${safeSchool}_Kelas_${safeClass}_9perA4.pdf`);
+      doc.save(`Kartu_Presensi_CR80_Landscape_${safeSchool}_Kelas_${safeClass}_8perA4.pdf`);
     } catch (err) {
       console.error('Error generating PDF:', err);
       alert('Terjadi kesalahan saat mengekspor PDF kartu siswa.');
@@ -328,10 +328,10 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white">
-                  Cetak Massal Kartu Siswa Standar CR80 (85,6 × 53,98 mm)
+                  Cetak Massal Kartu Siswa Standar CR80 Landscape (85,6 × 53,98 mm)
                 </h3>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                  9 Kartu / A4
+                  8 Kartu Landscape / A4
                 </span>
                 {isWaliKelas && myHomeroom && (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
@@ -340,7 +340,7 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
                 )}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Pilih desain kartu di bawah. Format standar CR80 memuat 9 kartu presisi pada 1 lembar A4 dengan garis potong.
+                Format landscape memuat QR Code presensi lebih besar & tajam agar instan discan scanner/kamera HP, dengan 8 kartu presisi per lembar A4.
               </p>
             </div>
           </div>
@@ -351,10 +351,10 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
               onClick={handleExportPDF}
               disabled={isGeneratingQR || isExportingPDF || printableStudents.length === 0}
               className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
-              title="Unduh File PDF A4 Siap Cetak (9 Kartu CR80 / Lembar)"
+              title="Unduh File PDF A4 Siap Cetak (8 Kartu CR80 Landscape / Lembar)"
             >
               <i className={`fa-solid ${isExportingPDF ? 'fa-spinner fa-spin' : 'fa-file-pdf'}`}></i>
-              <span>{isExportingPDF ? 'Membuat PDF...' : 'Unduh PDF (9/A4)'}</span>
+              <span>{isExportingPDF ? 'Membuat PDF...' : 'Unduh PDF (8/A4)'}</span>
             </button>
 
             <button
@@ -567,6 +567,13 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
                     margin: 0;
                     background: white !important;
                   }
+                  .cards-print-grid {
+                    display: grid !important;
+                    grid-template-columns: repeat(2, 85.6mm) !important;
+                    column-gap: 8mm !important;
+                    row-gap: 8mm !important;
+                    justify-content: center !important;
+                  }
                   .no-print {
                     display: none !important;
                   }
@@ -577,16 +584,24 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
                   .card-item {
                     page-break-inside: avoid;
                     break-inside: avoid;
+                    width: 85.6mm !important;
+                    height: 53.98mm !important;
+                  }
+                  .card-item .cr80-card {
+                    width: 85.6mm !important;
+                    height: 53.98mm !important;
+                    border: 0.5px solid #cbd5e1 !important;
+                    box-shadow: none !important;
                   }
                   @page {
                     size: A4 portrait;
-                    margin: 10mm;
+                    margin: 15mm 12mm;
                   }
                 }
               `}</style>
 
-              {/* Grid Layout of Cards: 3 Columns for CR80 Standard */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto justify-items-center">
+              {/* Grid Layout of Cards: 2 Columns for CR80 Landscape Standard */}
+              <div className="cards-print-grid grid grid-cols-1 md:grid-cols-2 gap-6 max-w-5xl mx-auto justify-items-center">
                 {printableStudents.map((student, idx) => {
                   const isChecked = selectedStudentIds.has(student.id);
                   const qrUrl = qrMap[student.id];
@@ -595,7 +610,7 @@ export const BulkCardPrintModal: React.FC<BulkCardPrintModalProps> = ({
                   return (
                     <div
                       key={student.id}
-                      className={`card-item ${(idx + 1) % 9 === 0 ? 'page-break' : ''}`}
+                      className={`card-item ${(idx + 1) % 8 === 0 ? 'page-break' : ''}`}
                     >
                       <CR80StudentCard
                         templateId={selectedTemplate}

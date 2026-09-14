@@ -176,14 +176,14 @@ export const StudentCardModal: React.FC<StudentCardModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white">
-                  Kartu Siswa Standar CR80
+                  Kartu Siswa Standar CR80 Landscape
                 </h3>
                 <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                  85,60 × 53,98 mm
+                  85,60 × 53,98 mm (Landscape)
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Pilih desain kartu untuk <strong>{student.name}</strong> ({student.classRoom}).
+                Format landscape dengan QR Code besar & tajam agar instan discan untuk <strong>{student.name}</strong> ({student.classRoom}).
               </p>
             </div>
           </div>

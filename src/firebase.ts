@@ -9,26 +9,26 @@ import {
 import firebaseConfigDefault from '../firebase-applet-config.json';
 
 const activeFirebaseConfig = {
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseConfigDefault.projectId,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseConfigDefault.appId,
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfigDefault.apiKey,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigDefault.authDomain,
-  firestoreDatabaseId: import.meta.env.VITE_FIRESTORE_DATABASE_ID || (firebaseConfigDefault as any).firestoreDatabaseId,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || (firebaseConfigDefault as any).storageBucket,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || (firebaseConfigDefault as any).messagingSenderId,
+  projectId: import.meta.env?.VITE_FIREBASE_PROJECT_ID || firebaseConfigDefault.projectId,
+  appId: import.meta.env?.VITE_FIREBASE_APP_ID || firebaseConfigDefault.appId,
+  apiKey: import.meta.env?.VITE_FIREBASE_API_KEY || firebaseConfigDefault.apiKey,
+  authDomain: import.meta.env?.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigDefault.authDomain,
+  firestoreDatabaseId: import.meta.env?.VITE_FIRESTORE_DATABASE_ID || (firebaseConfigDefault as any).firestoreDatabaseId,
+  storageBucket: import.meta.env?.VITE_FIREBASE_STORAGE_BUCKET || (firebaseConfigDefault as any).storageBucket,
+  messagingSenderId: import.meta.env?.VITE_FIREBASE_MESSAGING_SENDER_ID || (firebaseConfigDefault as any).messagingSenderId,
 };
 
 const app = getApps().length > 0 ? getApp() : initializeApp(activeFirebaseConfig);
 
 const databaseId = activeFirebaseConfig.firestoreDatabaseId || undefined;
 
-// Initialize Firestore with auto-detect long polling for robust cloud / iframe connectivity
+// Initialize Firestore with forced long polling for robust cloud / iframe connectivity
 let firestoreInstance;
 try {
   firestoreInstance = initializeFirestore(
     app,
     {
-      experimentalAutoDetectLongPolling: true,
+      experimentalForceLongPolling: true,
       ignoreUndefinedProperties: true,
     },
     databaseId
@@ -43,22 +43,33 @@ export const auth = getAuth(app);
 // Target Database ID for e-Rapor Merdeka (iihh Beres)
 export const IIHH_BERES_DATABASE_ID = 'ai-studio-iihhberes-db02674d-a027-43d4-b17e-50573c47075a';
 
-// Target Firestore instance for e-Rapor Merdeka (iihh Beres)
-let iihhBeresInstance;
-try {
-  iihhBeresInstance = initializeFirestore(
-    app,
-    {
-      experimentalAutoDetectLongPolling: true,
-      ignoreUndefinedProperties: true,
-    },
-    IIHH_BERES_DATABASE_ID
-  );
-} catch {
-  iihhBeresInstance = getFirestore(app, IIHH_BERES_DATABASE_ID);
+// Target Firestore instance for e-Rapor Merdeka (iihh Beres) - lazy initialization to prevent startup errors
+let _iihhBeresInstance: any = null;
+export function getIihhBeresDb() {
+  if (!_iihhBeresInstance) {
+    try {
+      _iihhBeresInstance = initializeFirestore(
+        app,
+        {
+          experimentalForceLongPolling: true,
+          ignoreUndefinedProperties: true,
+        },
+        IIHH_BERES_DATABASE_ID
+      );
+    } catch {
+      _iihhBeresInstance = getFirestore(app, IIHH_BERES_DATABASE_ID);
+    }
+  }
+  return _iihhBeresInstance;
 }
 
-export const iihhBeresDb = iihhBeresInstance;
+// Backward-compatible getter
+export const iihhBeresDb = new Proxy({} as any, {
+  get(_target, prop) {
+    const instance = getIihhBeresDb();
+    return (instance as any)[prop];
+  },
+});
 
 export enum OperationType {
   CREATE = 'create',

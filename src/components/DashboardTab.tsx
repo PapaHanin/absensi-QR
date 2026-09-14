@@ -111,12 +111,13 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     return attendanceRecords;
   }, [attendanceRecords, filterMode, selectedDate, startDate, endDate, monthPicker]);
 
-  // Readable Date Range Label for UI and PDF Report
+  // Readable Date Range Label for UI and PDF Report (Timezone Safe)
   const dateRangeLabel = useMemo(() => {
     if (filterMode === 'daily') {
       try {
-        const d = new Date(selectedDate);
-        return d.toLocaleDateString('id-ID', {
+        const [y, m, d] = selectedDate.split('-').map(Number);
+        const dateObj = new Date(y, m - 1, d);
+        return dateObj.toLocaleDateString('id-ID', {
           weekday: 'long',
           day: 'numeric',
           month: 'long',
@@ -126,11 +127,19 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         return selectedDate;
       }
     } else if (filterMode === 'range') {
-      return `${startDate} s/d ${endDate}`;
+      try {
+        const [sy, sm, sd] = startDate.split('-').map(Number);
+        const sObj = new Date(sy, sm - 1, sd);
+        const [ey, em, ed] = endDate.split('-').map(Number);
+        const eObj = new Date(ey, em - 1, ed);
+        return `${sObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })} s/d ${eObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+      } catch {
+        return `${startDate} s/d ${endDate}`;
+      }
     } else if (filterMode === 'monthly') {
       try {
-        const [y, m] = monthPicker.split('-');
-        const d = new Date(parseInt(y), parseInt(m) - 1, 1);
+        const [y, m] = monthPicker.split('-').map(Number);
+        const d = new Date(y, m - 1, 1);
         const mName = d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
         return `Bulan ${mName}`;
       } catch {
@@ -434,7 +443,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     });
   };
 
-  const handleExportPDF = () => {
+  const handleExportPDF = (directPrint = false) => {
     const hrTeacher = findHomeroomTeacher(teachers, selectedClass, currentTeacher);
     const hm = {
       name: settings.headmasterName,
@@ -453,6 +462,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         settings,
         homeroomTeacher: hrTeacher,
         headmaster: hm,
+        directPrint,
       });
       return;
     }
@@ -462,14 +472,47 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       return;
     }
 
+    // Enrich records with resolved teacher information so the PDF table matches on-screen data
+    const enrichedRecords = filteredTableData.map((rec) => {
+      const resolved = resolveRecordTeacher(rec, teachers, students, currentTeacher);
+      const teacherRole =
+        resolved.type === 'wali_kelas'
+          ? resolved.subject.startsWith('Wali')
+            ? resolved.subject
+            : `Wali ${resolved.subject}`
+          : resolved.type === 'guru_mapel'
+          ? resolved.subject.startsWith('Mapel')
+            ? resolved.subject
+            : `Mapel: ${resolved.subject}`
+          : resolved.subject || 'Admin';
+
+      return {
+        ...rec,
+        teacherDisplay: `${resolved.name} (${teacherRole})`,
+      };
+    });
+
+    // Build filter summary
+    const filterParts: string[] = [];
+    if (selectedStatus !== 'Semua') filterParts.push(`Status: ${selectedStatus}`);
+    if (selectedTeacherFilter !== 'Semua') {
+      const tObj = teachers.find((t) => t.id === selectedTeacherFilter);
+      filterParts.push(`Guru: ${tObj?.name || selectedTeacherFilter}`);
+    }
+    if (isGuruMapel && guruMapelViewMode === 'mapel_saya') {
+      filterParts.push(`Mapel: ${currentTeacher?.subject || 'Mata Pelajaran'}`);
+    }
+
     generateAttendancePDFReport({
-      records: filteredTableData,
+      records: enrichedRecords,
       dateRangeLabel,
       selectedClass,
       settings,
       stats,
       homeroomTeacher: hrTeacher,
       headmaster: hm,
+      directPrint,
+      filterSummary: filterParts.length > 0 ? filterParts.join(' | ') : undefined,
     });
   };
 
@@ -561,12 +604,21 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             </button>
 
             <button
-              onClick={handleExportPDF}
+              onClick={() => handleExportPDF(false)}
               className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
-              title="Unduh Laporan Absensi PDF Siap Cetak"
+              title="Unduh file Laporan Absensi format PDF resmi"
             >
               <i className="fa-solid fa-file-pdf"></i>
               <span>Unduh PDF</span>
+            </button>
+
+            <button
+              onClick={() => handleExportPDF(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-700 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer border border-slate-600"
+              title="Cetak langsung laporan absensi ke printer fisik / dialog cetak"
+            >
+              <i className="fa-solid fa-print"></i>
+              <span>Cetak / Print</span>
             </button>
 
             {onOpenERaporSync && (
