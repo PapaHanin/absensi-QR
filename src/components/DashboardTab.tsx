@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Student, AttendanceRecord, AttendanceStatus, SystemSettings, Teacher, ScheduledLeave, BehaviorLog } from '../types';
 import { exportAttendanceToCSV, exportMonthlyRecapToCSV } from '../utils/csv';
 import { openWhatsAppNotification } from '../utils/whatsapp';
@@ -45,7 +45,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   selectedDate,
   setSelectedDate,
   settings,
-  teachers,
+  teachers = [],
   currentTeacher,
   onAddManualAttendance,
   onUpdateRecord,
@@ -61,11 +61,28 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const isGuruMapel = !isAdmin && currentTeacher?.teacherType === 'guru_mapel';
   const myHomeroom = currentTeacher?.homeroomClass;
 
+  // Available classes list from students (sorted)
+  const availableClassesList = useMemo(() => {
+    const setCls = new Set(students.map((s) => s.classRoom));
+    return Array.from(setCls).sort();
+  }, [students]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClass, setSelectedClass] = useState<string>(() => {
     if (isWaliKelas && myHomeroom) return myHomeroom;
+    if (isGuruMapel) return '1';
     return 'Semua';
   });
+
+  // Lock Wali Kelas to their homeroom, and default Guru Mapel to the first available class
+  useEffect(() => {
+    if (isWaliKelas && myHomeroom) {
+      if (selectedClass !== myHomeroom) setSelectedClass(myHomeroom);
+    } else if (isGuruMapel && (selectedClass === 'Semua' || !selectedClass)) {
+      setSelectedClass(availableClassesList[0] || '1');
+    }
+  }, [isWaliKelas, myHomeroom, isGuruMapel, availableClassesList, selectedClass]);
+
   const [selectedStatus, setSelectedStatus] = useState<string>('Semua');
   const [selectedTeacherFilter, setSelectedTeacherFilter] = useState<string>('Semua');
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
@@ -149,6 +166,197 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     return selectedDate;
   }, [filterMode, selectedDate, startDate, endDate, monthPicker]);
 
+  // Available teachers for filter dropdown (Role-Restricted!)
+  const availableTeachersForFilter = useMemo(() => {
+    if (isAdmin) return teachers;
+    if (isWaliKelas && myHomeroom) {
+      // Wali Kelas: only see themselves and Guru Mapel who teach in their class (NO other homeroom teachers!)
+      return teachers.filter(
+        (t) => t.id === currentTeacher?.id || t.teacherType === 'guru_mapel'
+      );
+    }
+    if (isGuruMapel) {
+      return teachers.filter((t) => t.id === currentTeacher?.id);
+    }
+    return teachers;
+  }, [isAdmin, isWaliKelas, isGuruMapel, myHomeroom, teachers, currentTeacher]);
+
+  // Per-Student Monthly/Range Summary Breakdown: Hadir, Terlambat, Sakit, Izin, Alfa
+  // Mathematically accurate: evaluates all active effective dates for this class/subject,
+  // counting unexcused non-attendances as Alfa (A).
+  const monthlyStudentRecaps = useMemo(() => {
+    if (filterMode !== 'monthly' && filterMode !== 'range') return [];
+
+    // Filter relevant students based on role
+    const classStudents = students.filter((s) => {
+      let matchClass = true;
+      if (isWaliKelas && myHomeroom) {
+        matchClass = isHomeroomClassMatch(s.classRoom, myHomeroom);
+      } else if (selectedClass !== 'Semua') {
+        matchClass = isHomeroomClassMatch(s.classRoom, selectedClass) || s.classRoom === selectedClass;
+      }
+      const matchSearch =
+        !searchTerm ||
+        s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        s.nis.toLowerCase().includes(searchTerm.toLowerCase());
+      return matchClass && matchSearch;
+    });
+
+    if (classStudents.length === 0) return [];
+
+    // 1. Gather all attendance records matching the date filter
+    let scopedRecords = attendanceRecords;
+    if (filterMode === 'monthly') {
+      if (monthPicker) {
+        scopedRecords = scopedRecords.filter((r) => r.date.startsWith(monthPicker));
+      }
+    } else if (filterMode === 'range') {
+      if (startDate && endDate) {
+        scopedRecords = scopedRecords.filter((r) => r.date >= startDate && r.date <= endDate);
+      }
+    }
+
+    // Role-based record scoping:
+    if (isGuruMapel) {
+      // Guru Mapel: ONLY records recorded by this teacher / their subject
+      scopedRecords = scopedRecords.filter((r) => {
+        const resolved = resolveRecordTeacher(r, teachers, students, currentTeacher);
+        const isMine =
+          (r.teacherId && r.teacherId === currentTeacher?.id) ||
+          resolved.name.toLowerCase().trim() === currentTeacher?.name.toLowerCase().trim();
+        return isMine;
+      });
+    } else if (isWaliKelas && myHomeroom) {
+      // Wali Kelas: records in this homeroom class (Wali Kelas + Guru Mapel for this class)
+      // "jangan rekapan semua guru dari kelas lain dimasukan di rekapan wali kelas"
+      scopedRecords = scopedRecords.filter((r) => {
+        if (!isHomeroomClassMatch(r.classRoom, myHomeroom)) return false;
+        const res = resolveRecordTeacher(r, teachers, students, currentTeacher);
+        if (waliRecorderFilter === 'wali') {
+          return res.type === 'wali_kelas';
+        } else if (waliRecorderFilter === 'mapel') {
+          return res.type === 'guru_mapel';
+        }
+        return true;
+      });
+    } else {
+      // Admin: full access
+      if (selectedTeacherFilter !== 'Semua') {
+        const targetTeacher = teachers.find((t) => t.id === selectedTeacherFilter);
+        scopedRecords = scopedRecords.filter((r) => {
+          const resolved = resolveRecordTeacher(r, teachers, students, currentTeacher);
+          return (
+            r.teacherId === selectedTeacherFilter ||
+            resolved.name.toLowerCase().trim() === selectedTeacherFilter.toLowerCase().trim() ||
+            (targetTeacher && resolved.name.toLowerCase().trim() === targetTeacher.name.toLowerCase().trim())
+          );
+        });
+      }
+    }
+
+    // Filter scopedRecords to only students in classStudents
+    const relevantStudentIds = new Set(classStudents.map((s) => s.id));
+    const relevantStudentNis = new Set(classStudents.map((s) => s.nis));
+    const classRecords = scopedRecords.filter(
+      (r) => relevantStudentIds.has(r.studentId) || relevantStudentNis.has(r.nis)
+    );
+
+    // Determine the distinct effective active school dates recorded in this period for this class/subject
+    const activeDatesSet = new Set<string>();
+    classRecords.forEach((r) => {
+      if (r.date) activeDatesSet.add(r.date);
+    });
+    const effectiveDates = Array.from(activeDatesSet).sort();
+
+    // Map each student through these effective dates
+    return classStudents.map((s) => {
+      const studentRecords = classRecords.filter(
+        (r) => r.studentId === s.id || r.nis === s.nis
+      );
+
+      // Create a map by date for exact single-status resolution
+      const recordByDate = new Map<string, AttendanceRecord>();
+      studentRecords.forEach((r) => {
+        const existing = recordByDate.get(r.date);
+        if (!existing) {
+          recordByDate.set(r.date, r);
+        } else if (r.status === 'Hadir' && existing.status !== 'Hadir') {
+          recordByDate.set(r.date, r);
+        }
+      });
+
+      let hadir = 0;
+      let terlambat = 0;
+      let sakit = 0;
+      let izin = 0;
+      let alpa = 0;
+
+      if (effectiveDates.length > 0) {
+        effectiveDates.forEach((d) => {
+          const rec = recordByDate.get(d);
+          if (rec) {
+            if (rec.status === 'Hadir') hadir++;
+            else if (rec.status === 'Terlambat') terlambat++;
+            else if (rec.status === 'Sakit') sakit++;
+            else if (rec.status === 'Izin') izin++;
+            else if (rec.status === 'Alpa') alpa++;
+          } else {
+            // Check if student has an approved scheduled leave covering date d
+            const leave = scheduledLeaves.find(
+              (l) => l.studentId === s.id && l.status !== 'Dibatalkan' && d >= l.startDate && d <= l.endDate
+            );
+            if (leave) {
+              if (leave.type === 'Sakit') sakit++;
+              else if (leave.type === 'Izin' || leave.type === 'Dispensasi') izin++;
+            } else {
+              // No attendance record and no approved leave on an effective school day = ALFA!
+              alpa++;
+            }
+          }
+        });
+      }
+
+      const totalHadir = hadir + terlambat;
+      const totalHari = hadir + terlambat + sakit + izin + alpa;
+      const percentage = totalHari > 0 ? Math.round((totalHadir / totalHari) * 100) : 0;
+
+      return {
+        studentId: s.id,
+        nis: s.nis,
+        name: s.name,
+        classRoom: s.classRoom,
+        gender: s.gender,
+        avatarUrl: s.avatarUrl || s.photo,
+        parentPhone: s.parentPhone,
+        hadir,
+        terlambat,
+        sakit,
+        izin,
+        alpa,
+        totalHadir,
+        totalHari,
+        percentage,
+      };
+    });
+  }, [
+    filterMode,
+    students,
+    isWaliKelas,
+    myHomeroom,
+    isGuruMapel,
+    selectedClass,
+    searchTerm,
+    monthPicker,
+    startDate,
+    endDate,
+    attendanceRecords,
+    scheduledLeaves,
+    currentTeacher,
+    teachers,
+    waliRecorderFilter,
+    selectedTeacherFilter,
+  ]);
+
   // Statistics calculation
   const stats = useMemo(() => {
     let relevantStudents = students;
@@ -157,10 +365,22 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     } else if (selectedClass !== 'Semua') {
       relevantStudents = students.filter((s) => isHomeroomClassMatch(s.classRoom, selectedClass) || s.classRoom === selectedClass);
     }
+    const totalStudents = relevantStudents.length;
 
+    // In monthly or range summary view, derive stats directly from monthlyStudentRecaps for exact alignment
+    if ((filterMode === 'monthly' || filterMode === 'range') && monthlyStudentRecaps.length > 0) {
+      const hadir = monthlyStudentRecaps.reduce((sum, r) => sum + r.hadir, 0);
+      const terlambat = monthlyStudentRecaps.reduce((sum, r) => sum + r.terlambat, 0);
+      const izinSakit = monthlyStudentRecaps.reduce((sum, r) => sum + r.sakit + r.izin, 0);
+      const alpa = monthlyStudentRecaps.reduce((sum, r) => sum + r.alpa, 0);
+      const totalRecorded = hadir + terlambat + izinSakit + alpa;
+      const unrecorded = 0;
+      return { totalStudents, hadir, terlambat, izinSakit, alpa, totalRecorded, unrecorded };
+    }
+
+    // Daily Mode:
     let relevantRecords = dateFilteredRecords;
-    if (isGuruMapel && guruMapelViewMode === 'mapel_saya') {
-      // Guru Mapel personal rekap: records taken by this teacher
+    if (isGuruMapel) {
       relevantRecords = dateFilteredRecords.filter((r) => {
         const isMine = (r.teacherId && r.teacherId === currentTeacher?.id) ||
           resolveRecordTeacher(r, teachers, students, currentTeacher).name.toLowerCase().trim() === currentTeacher?.name.toLowerCase().trim();
@@ -171,7 +391,6 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         return true;
       });
     } else if (isWaliKelas && myHomeroom) {
-      // Wali Kelas rekap: ALL records in this homeroom class (both by Wali Kelas & by Guru Mapel!)
       relevantRecords = dateFilteredRecords.filter((r) => {
         if (!isHomeroomClassMatch(r.classRoom, myHomeroom)) return false;
         if (waliRecorderFilter === 'wali') {
@@ -187,7 +406,6 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       relevantRecords = dateFilteredRecords.filter((r) => isHomeroomClassMatch(r.classRoom, selectedClass) || r.classRoom === selectedClass);
     }
 
-    const totalStudents = relevantStudents.length;
     const hadir = relevantRecords.filter((r) => r.status === 'Hadir').length;
     const terlambat = relevantRecords.filter((r) => r.status === 'Terlambat').length;
     const izinSakit = relevantRecords.filter((r) => r.status === 'Izin' || r.status === 'Sakit').length;
@@ -196,7 +414,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     const unrecorded = Math.max(0, totalStudents - totalRecorded);
 
     return { totalStudents, hadir, terlambat, izinSakit, alpa, totalRecorded, unrecorded };
-  }, [students, dateFilteredRecords, isWaliKelas, myHomeroom, isGuruMapel, guruMapelViewMode, waliRecorderFilter, currentTeacher, teachers, selectedClass]);
+  }, [students, dateFilteredRecords, isWaliKelas, myHomeroom, isGuruMapel, waliRecorderFilter, currentTeacher, teachers, selectedClass, filterMode, monthlyStudentRecaps]);
 
   // Active Leaves for today/selectedDate
   const activeLeavesCount = useMemo(() => {
@@ -211,9 +429,20 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     return ['Semua', ...Array.from(setCls).sort()];
   }, [students]);
 
-  // Teacher Attendance Activity Monitoring
+  // Teacher Attendance Activity Monitoring (Role-Scoped!)
   const teacherAttendanceActivity = useMemo(() => {
-    return teachers.map((tch) => {
+    let displayTeachers = teachers;
+    if (isWaliKelas && myHomeroom) {
+      // Wali Kelas only sees themselves and Guru Mapel who teach in their class (NO other homeroom teachers!)
+      displayTeachers = teachers.filter(
+        (tch) => tch.id === currentTeacher?.id || tch.teacherType === 'guru_mapel'
+      );
+    } else if (isGuruMapel) {
+      // Guru Mapel only monitors their own attendance activity
+      displayTeachers = teachers.filter((tch) => tch.id === currentTeacher?.id);
+    }
+
+    return displayTeachers.map((tch) => {
       const byTeacher = dateFilteredRecords.filter((r) => {
         if (tch.teacherType === 'guru_mapel') {
           // Guru Mapel: records where they are the assigned teacher
@@ -259,7 +488,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         isDone: count > 0,
       };
     });
-  }, [teachers, dateFilteredRecords, students, currentTeacher]);
+  }, [teachers, dateFilteredRecords, students, currentTeacher, isWaliKelas, isGuruMapel, myHomeroom]);
 
   const activeTeachersCount = useMemo(() => {
     return teacherAttendanceActivity.filter((t) => t.isDone).length;
@@ -329,79 +558,6 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     currentTeacher,
   ]);
 
-  // Per-Student Monthly Summary Breakdown: Hadir, Terlambat, Sakit, Izin, Alfa
-  const monthlyStudentRecaps = useMemo(() => {
-    if (filterMode !== 'monthly') return [];
-
-    const classStudents = students.filter((s) => {
-      let matchClass = true;
-      if (isWaliKelas && myHomeroom) {
-        matchClass = isHomeroomClassMatch(s.classRoom, myHomeroom);
-      } else if (selectedClass !== 'Semua') {
-        matchClass = isHomeroomClassMatch(s.classRoom, selectedClass) || s.classRoom === selectedClass;
-      }
-      const matchSearch =
-        !searchTerm ||
-        s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        s.nis.toLowerCase().includes(searchTerm.toLowerCase());
-      return matchClass && matchSearch;
-    });
-
-    return classStudents.map((s) => {
-      const recordsInMonth = attendanceRecords.filter(
-        (r) => r.date.startsWith(monthPicker) && (r.studentId === s.id || r.nis === s.nis)
-      );
-
-      let hadir = recordsInMonth.filter((r) => r.status === 'Hadir').length;
-      let terlambat = recordsInMonth.filter((r) => r.status === 'Terlambat').length;
-      let sakit = recordsInMonth.filter((r) => r.status === 'Sakit').length;
-      let izin = recordsInMonth.filter((r) => r.status === 'Izin').length;
-      let alpa = recordsInMonth.filter((r) => r.status === 'Alpa').length;
-
-      // Account for multi-day scheduled leaves
-      scheduledLeaves?.forEach((leave) => {
-        if (leave.studentId === s.id) {
-          const start = new Date(leave.startDate);
-          const end = new Date(leave.endDate);
-          const cur = new Date(start);
-          while (cur <= end) {
-            const curStr = cur.toISOString().split('T')[0];
-            if (curStr.startsWith(monthPicker)) {
-              const alreadyHasRecord = recordsInMonth.some((r) => r.date === curStr);
-              if (!alreadyHasRecord) {
-                if (leave.type === 'Sakit') sakit++;
-                else if (leave.type === 'Izin' || leave.type === 'Dispensasi') izin++;
-              }
-            }
-            cur.setDate(cur.getDate() + 1);
-          }
-        }
-      });
-
-      const totalHadir = hadir + terlambat;
-      const totalHari = hadir + terlambat + sakit + izin + alpa;
-      const percentage = totalHari > 0 ? Math.round((totalHadir / totalHari) * 100) : 0;
-
-      return {
-        studentId: s.id,
-        nis: s.nis,
-        name: s.name,
-        classRoom: s.classRoom,
-        gender: s.gender,
-        avatarUrl: s.avatarUrl || s.photo,
-        parentPhone: s.parentPhone,
-        hadir,
-        terlambat,
-        sakit,
-        izin,
-        alpa,
-        totalHadir,
-        totalHari,
-        percentage,
-      };
-    });
-  }, [filterMode, students, isWaliKelas, myHomeroom, selectedClass, searchTerm, monthPicker, attendanceRecords, scheduledLeaves]);
-
   const handleExportCSV = () => {
     const hrTeacher = findHomeroomTeacher(teachers, selectedClass, currentTeacher);
     const hm = {
@@ -409,11 +565,24 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       nip: settings.headmasterNip,
     };
 
-    if (filterMode === 'monthly') {
+    const isSummaryView = (filterMode === 'monthly' || filterMode === 'range') && monthlyViewMode === 'summary';
+
+    if (isSummaryView || filterMode === 'monthly') {
       if (!monthlyStudentRecaps || monthlyStudentRecaps.length === 0) {
         setExportAlertMessage('Tidak ada data siswa untuk diekspor ke rekap bulanan pada filter saat ini.');
         return;
       }
+
+      const reportType = isGuruMapel ? 'guru_mapel' : isWaliKelas ? 'wali_kelas' : 'admin';
+      const subjectInfo =
+        isGuruMapel && currentTeacher
+          ? {
+              teacherName: currentTeacher.name,
+              teacherNip: currentTeacher.nip,
+              subjectName: currentTeacher.subject,
+            }
+          : undefined;
+
       exportMonthlyRecapToCSV({
         recaps: monthlyStudentRecaps,
         monthLabel: dateRangeLabel,
@@ -421,6 +590,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         settings,
         homeroomTeacher: hrTeacher,
         headmaster: hm,
+        reportType,
+        subjectInfo,
+        totalEffectiveDays: monthlyStudentRecaps[0]?.totalHari,
       });
       return;
     }
@@ -450,11 +622,24 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       nip: settings.headmasterNip,
     };
 
-    if (filterMode === 'monthly') {
+    const isSummaryView = (filterMode === 'monthly' || filterMode === 'range') && monthlyViewMode === 'summary';
+
+    if (isSummaryView || filterMode === 'monthly') {
       if (!monthlyStudentRecaps || monthlyStudentRecaps.length === 0) {
         setExportAlertMessage('Tidak ada data siswa untuk dicetak ke PDF rekap bulanan.');
         return;
       }
+
+      const reportType = isGuruMapel ? 'guru_mapel' : isWaliKelas ? 'wali_kelas' : 'admin';
+      const subjectInfo =
+        isGuruMapel && currentTeacher
+          ? {
+              teacherName: currentTeacher.name,
+              teacherNip: currentTeacher.nip,
+              subjectName: currentTeacher.subject,
+            }
+          : undefined;
+
       generateMonthlyAttendancePDFReport({
         recaps: monthlyStudentRecaps,
         monthLabel: dateRangeLabel,
@@ -463,6 +648,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         homeroomTeacher: hrTeacher,
         headmaster: hm,
         directPrint,
+        reportType,
+        subjectInfo,
+        totalEffectiveDays: monthlyStudentRecaps[0]?.totalHari,
       });
       return;
     }
@@ -499,7 +687,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       const tObj = teachers.find((t) => t.id === selectedTeacherFilter);
       filterParts.push(`Guru: ${tObj?.name || selectedTeacherFilter}`);
     }
-    if (isGuruMapel && guruMapelViewMode === 'mapel_saya') {
+    if (isGuruMapel) {
       filterParts.push(`Mapel: ${currentTeacher?.subject || 'Mata Pelajaran'}`);
     }
 
@@ -732,114 +920,169 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
         {/* Guru Mapel Dedicated Portal Banner */}
         {isGuruMapel && (
-          <div className="bg-blue-50/90 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/80 p-3.5 rounded-xl flex flex-col md:flex-row md:items-center md:justify-between gap-3 shadow-2xs">
-            <div className="flex items-start sm:items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center text-base font-bold shadow-xs shrink-0">
-                <i className="fa-solid fa-book-open-reader"></i>
-              </div>
-              <div>
-                <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex flex-wrap items-center gap-1.5">
-                  <span className="text-slate-600 dark:text-slate-400">Portal Guru Mata Pelajaran:</span>
-                  <span className="text-blue-700 dark:text-blue-300 font-extrabold">{currentTeacher?.name}</span>
-                  <span className="px-2 py-0.5 rounded-md text-[10px] bg-blue-100 dark:bg-blue-900/80 text-blue-800 dark:text-blue-200 font-extrabold border border-blue-200 dark:border-blue-700">
-                    Mapel: {currentTeacher?.subject}
-                  </span>
+          <div className="bg-blue-50/90 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/80 p-4 rounded-xl space-y-3 shadow-2xs">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center text-base font-bold shadow-xs shrink-0">
+                  <i className="fa-solid fa-book-open-reader"></i>
                 </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  Rekap kehadiran siswa khusus mata pelajaran Anda terpisah rapi, dan otomatis terrekap untuk Wali Kelas yang bersangkutan.
-                </p>
+                <div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex flex-wrap items-center gap-1.5">
+                    <span className="text-slate-600 dark:text-slate-400">Portal Guru Mata Pelajaran:</span>
+                    <span className="text-blue-700 dark:text-blue-300 font-extrabold">{currentTeacher?.name}</span>
+                    <span className="px-2 py-0.5 rounded-md text-[10px] bg-blue-100 dark:bg-blue-900/80 text-blue-800 dark:text-blue-200 font-extrabold border border-blue-200 dark:border-blue-700">
+                      Mapel: {currentTeacher?.subject}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Pilih kelas di bawah ini untuk melihat rekapitulasi dan mencetak laporan bulanan khusus mata pelajaran Anda.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-start md:self-auto">
+                <button
+                  onClick={() => handleExportPDF(false)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
+                  title={`Unduh PDF Rekap Bulanan Mapel ${currentTeacher?.subject} Kelas ${selectedClass}`}
+                >
+                  <i className="fa-solid fa-file-pdf"></i>
+                  <span>Unduh PDF Kelas {selectedClass}</span>
+                </button>
+                <button
+                  onClick={() => handleExportPDF(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer border border-slate-600"
+                  title={`Cetak Rekap Bulanan Mapel ${currentTeacher?.subject} Kelas ${selectedClass}`}
+                >
+                  <i className="fa-solid fa-print"></i>
+                  <span>Cetak Kelas {selectedClass}</span>
+                </button>
               </div>
             </div>
 
-            {/* View Scope Toggle for Guru Mapel */}
-            <div className="flex items-center gap-1 bg-white dark:bg-slate-900 p-1 rounded-xl border border-blue-200 dark:border-blue-800 text-xs shrink-0 self-start md:self-auto">
-              <button
-                type="button"
-                onClick={() => setGuruMapelViewMode('mapel_saya')}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 font-bold cursor-pointer ${
-                  guruMapelViewMode === 'mapel_saya'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <i className="fa-solid fa-user-check text-xs"></i>
-                <span>Rekap Mapel Saya</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setGuruMapelViewMode('semua')}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 font-bold cursor-pointer ${
-                  guruMapelViewMode === 'semua'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <i className="fa-solid fa-school text-xs"></i>
-                <span>Semua Siswa Sekolah</span>
-              </button>
+            {/* Class Selector Pills for Guru Mapel */}
+            <div className="pt-2 border-t border-blue-100 dark:border-blue-900/60 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold text-blue-900 dark:text-blue-200 mr-1 flex items-center gap-1">
+                <i className="fa-solid fa-chalkboard"></i>
+                <span>Pilih Kelas untuk Direkap:</span>
+              </span>
+              {availableClassesList.map((cls) => {
+                const isSelected = selectedClass === cls;
+                const studentCount = students.filter(
+                  (s) => isHomeroomClassMatch(s.classRoom, cls) || s.classRoom === cls
+                ).length;
+                return (
+                  <button
+                    key={cls}
+                    type="button"
+                    onClick={() => setSelectedClass(cls)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      isSelected
+                        ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-400/40'
+                        : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-blue-200 dark:border-blue-800/80 hover:border-blue-400'
+                    }`}
+                  >
+                    <span>Kelas {cls}</span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded-full text-[10px] ${
+                        isSelected
+                          ? 'bg-blue-800 text-white'
+                          : 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300'
+                      }`}
+                    >
+                      {studentCount}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
 
         {/* Wali Kelas Dedicated Portal Banner */}
         {isWaliKelas && (
-          <div className="bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 p-3.5 rounded-xl flex flex-col md:flex-row md:items-center md:justify-between gap-3 shadow-2xs">
+          <div className="bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 p-4 rounded-xl space-y-3 shadow-2xs">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-base font-bold shadow-xs shrink-0">
+                  <i className="fa-solid fa-chalkboard-user"></i>
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex flex-wrap items-center gap-1.5">
+                    <span className="text-slate-600 dark:text-slate-400">Portal Rekapitulasi Wali Kelas:</span>
+                    <span className="text-emerald-700 dark:text-emerald-300 font-extrabold">{currentTeacher?.name}</span>
+                    <span className="px-2 py-0.5 rounded-md text-[10px] bg-emerald-100 dark:bg-emerald-900/80 text-emerald-800 dark:text-emerald-200 font-extrabold border border-emerald-200 dark:border-emerald-700">
+                      Kelas {myHomeroom}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                    Rekapan ini menggabungkan presensi Anda (Wali Kelas) dan seluruh Guru Mata Pelajaran khusus di <strong className="text-emerald-700 dark:text-emerald-300">Kelas {myHomeroom}</strong>. Data guru dari kelas lain otomatis dikecualikan.
+                  </p>
+                </div>
+              </div>
+
+              {/* Recorder filter for Wali Kelas */}
+              <div className="flex items-center gap-1 bg-white dark:bg-slate-900 p-1 rounded-xl border border-emerald-200 dark:border-emerald-800 text-xs shrink-0 self-start md:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setWaliRecorderFilter('semua')}
+                  className={`px-2.5 py-1.5 rounded-lg transition-all font-bold cursor-pointer ${
+                    waliRecorderFilter === 'semua'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="Tampilkan rekapan gabungan Wali Kelas & Guru Mapel"
+                >
+                  Semua (Wali & Mapel)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWaliRecorderFilter('wali')}
+                  className={`px-2.5 py-1.5 rounded-lg transition-all font-bold cursor-pointer ${
+                    waliRecorderFilter === 'wali'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="Hanya absensi yang diinput oleh Wali Kelas"
+                >
+                  Hanya Wali Kelas
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWaliRecorderFilter('mapel')}
+                  className={`px-2.5 py-1.5 rounded-lg transition-all font-bold cursor-pointer ${
+                    waliRecorderFilter === 'mapel'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="Hanya absensi yang diinput oleh Guru Mapel"
+                >
+                  Hanya Guru Mapel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Admin Dedicated Portal Banner */}
+        {isAdmin && (
+          <div className="bg-purple-50/90 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/80 p-3.5 rounded-xl flex flex-col md:flex-row md:items-center md:justify-between gap-3 shadow-2xs">
             <div className="flex items-start sm:items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-base font-bold shadow-xs shrink-0">
-                <i className="fa-solid fa-chalkboard-user"></i>
+              <div className="w-10 h-10 rounded-xl bg-purple-600 text-white flex items-center justify-center text-base font-bold shadow-xs shrink-0">
+                <i className="fa-solid fa-user-shield"></i>
               </div>
               <div>
                 <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex flex-wrap items-center gap-1.5">
-                  <span className="text-slate-600 dark:text-slate-400">Portal Wali Kelas:</span>
-                  <span className="text-emerald-700 dark:text-emerald-300 font-extrabold">{currentTeacher?.name}</span>
-                  <span className="px-2 py-0.5 rounded-md text-[10px] bg-emerald-100 dark:bg-emerald-900/80 text-emerald-800 dark:text-emerald-200 font-extrabold border border-emerald-200 dark:border-emerald-700">
-                    Kelas {myHomeroom}
+                  <span className="text-slate-600 dark:text-slate-400">Portal Administrator:</span>
+                  <span className="text-purple-700 dark:text-purple-300 font-extrabold">{currentTeacher?.name || 'Admin'}</span>
+                  <span className="px-2 py-0.5 rounded-md text-[10px] bg-purple-100 dark:bg-purple-900/80 text-purple-800 dark:text-purple-200 font-extrabold border border-purple-200 dark:border-purple-700">
+                    Akses Penuh Seluruh Rekapan
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  Semua presensi siswa kelas {myHomeroom} (baik dari Anda maupun dari Guru Mapel) otomatis terintegrasi dan terrekap di sini.
+                  Anda memiliki hak akses untuk memantau, memfilter, dan mencetak seluruh rekapan absensi dari setiap wali kelas maupun guru mata pelajaran di semua kelas.
                 </p>
               </div>
-            </div>
-
-            {/* Recorder filter for Wali Kelas */}
-            <div className="flex items-center gap-1 bg-white dark:bg-slate-900 p-1 rounded-xl border border-emerald-200 dark:border-emerald-800 text-xs shrink-0 self-start md:self-auto">
-              <button
-                type="button"
-                onClick={() => setWaliRecorderFilter('semua')}
-                className={`px-2.5 py-1.5 rounded-lg transition-all font-bold cursor-pointer ${
-                  waliRecorderFilter === 'semua'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-                title="Tampilkan semua absensi di kelas Anda"
-              >
-                Semua Pengabsen
-              </button>
-              <button
-                type="button"
-                onClick={() => setWaliRecorderFilter('wali')}
-                className={`px-2.5 py-1.5 rounded-lg transition-all font-bold cursor-pointer ${
-                  waliRecorderFilter === 'wali'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-                title="Hanya absensi yang dilakukan oleh Wali Kelas"
-              >
-                Oleh Wali
-              </button>
-              <button
-                type="button"
-                onClick={() => setWaliRecorderFilter('mapel')}
-                className={`px-2.5 py-1.5 rounded-lg transition-all font-bold cursor-pointer ${
-                  waliRecorderFilter === 'mapel'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-                title="Hanya absensi yang dilakukan oleh Guru Mapel"
-              >
-                Oleh Guru Mapel
-              </button>
             </div>
           </div>
         )}
@@ -1191,21 +1434,47 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           {/* Filter Dropdowns */}
           <div className="flex flex-wrap items-center gap-2">
             {/* Filter Kelas */}
-            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs">
-              <i className="fa-solid fa-graduation-cap text-indigo-600 dark:text-indigo-400 text-xs"></i>
-              <span className="font-semibold text-slate-500 dark:text-slate-400 hidden sm:inline">Kelas:</span>
-              <select
-                value={selectedClass}
-                onChange={(e) => setSelectedClass(e.target.value)}
-                className="bg-transparent text-slate-800 dark:text-slate-100 font-bold focus:outline-none cursor-pointer"
-              >
-                {classesList.map((cls) => (
-                  <option key={cls} value={cls} className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
-                    {cls === 'Semua' ? 'Semua Kelas' : `Kelas ${cls}`}
+            {isWaliKelas && myHomeroom ? (
+              <div className="flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 rounded-xl px-3 py-1.5 text-xs text-emerald-800 dark:text-emerald-300 font-bold">
+                <i className="fa-solid fa-lock text-[10px]"></i>
+                <span>Kelas {myHomeroom} (Wali)</span>
+              </div>
+            ) : isGuruMapel ? (
+              <div className="flex items-center gap-1.5 bg-blue-50 dark:bg-blue-950/60 border border-blue-300 dark:border-blue-800 rounded-xl px-3 py-1.5 text-xs">
+                <i className="fa-solid fa-graduation-cap text-blue-600 dark:text-blue-400 text-xs"></i>
+                <span className="font-semibold text-blue-900 dark:text-blue-200">Kelas:</span>
+                <select
+                  value={selectedClass}
+                  onChange={(e) => setSelectedClass(e.target.value)}
+                  className="bg-transparent text-blue-900 dark:text-blue-100 font-bold focus:outline-none cursor-pointer"
+                >
+                  {availableClassesList.map((cls) => (
+                    <option key={cls} value={cls} className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
+                      Kelas {cls}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs">
+                <i className="fa-solid fa-graduation-cap text-indigo-600 dark:text-indigo-400 text-xs"></i>
+                <span className="font-semibold text-slate-500 dark:text-slate-400 hidden sm:inline">Kelas:</span>
+                <select
+                  value={selectedClass}
+                  onChange={(e) => setSelectedClass(e.target.value)}
+                  className="bg-transparent text-slate-800 dark:text-slate-100 font-bold focus:outline-none cursor-pointer"
+                >
+                  <option value="Semua" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
+                    Semua Kelas
                   </option>
-                ))}
-              </select>
-            </div>
+                  {availableClassesList.map((cls) => (
+                    <option key={cls} value={cls} className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
+                      Kelas {cls}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Filter Status */}
             <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs">
@@ -1232,10 +1501,12 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               <select
                 value={selectedTeacherFilter}
                 onChange={(e) => setSelectedTeacherFilter(e.target.value)}
-                className="bg-transparent text-slate-800 dark:text-slate-100 font-bold focus:outline-none cursor-pointer max-w-[140px] truncate"
+                className="bg-transparent text-slate-800 dark:text-slate-100 font-bold focus:outline-none cursor-pointer max-w-[150px] truncate"
               >
-                <option value="Semua" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">Semua Guru</option>
-                {teachers.map((tch) => (
+                <option value="Semua" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
+                  {isWaliKelas ? 'Semua (Wali & Mapel)' : isGuruMapel ? 'Mapel Saya' : 'Semua Guru'}
+                </option>
+                {availableTeachersForFilter.map((tch) => (
                   <option key={tch.id} value={tch.id} className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
                     {tch.name} ({tch.teacherType === 'wali_kelas' ? (tch.homeroomClass ? `Wali ${tch.homeroomClass}` : 'Wali Kelas') : tch.teacherType === 'guru_mapel' ? `Mapel ${tch.subject}` : 'Admin'})
                   </option>
@@ -1245,8 +1516,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           </div>
         </div>
 
-        {/* Monthly View Mode Switcher */}
-        {filterMode === 'monthly' && (
+        {/* View Mode Switcher for Monthly / Range View */}
+        {(filterMode === 'monthly' || filterMode === 'range') && (
           <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800">
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
@@ -1297,7 +1568,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         {/* Table Results Count & Reset */}
         <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-800 pt-3">
           <span>
-            {filterMode === 'monthly' && monthlyViewMode === 'summary' ? (
+            {(filterMode === 'monthly' || filterMode === 'range') && monthlyViewMode === 'summary' ? (
               <>
                 Menampilkan rekapitulasi kehadiran untuk <strong className="text-slate-900 dark:text-white font-mono font-bold">{monthlyStudentRecaps.length}</strong> siswa
                 {selectedClass !== 'Semua' && (
@@ -1316,11 +1587,13 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               </>
             )}
           </span>
-          {(searchTerm || selectedClass !== 'Semua' || selectedStatus !== 'Semua' || selectedTeacherFilter !== 'Semua') && (
+          {(searchTerm || (selectedClass !== 'Semua' && !isWaliKelas) || selectedStatus !== 'Semua' || selectedTeacherFilter !== 'Semua') && (
             <button
               onClick={() => {
                 setSearchTerm('');
-                setSelectedClass('Semua');
+                if (!isWaliKelas) {
+                  setSelectedClass(isGuruMapel ? availableClassesList[0] || '1' : 'Semua');
+                }
                 setSelectedStatus('Semua');
                 setSelectedTeacherFilter('Semua');
               }}
@@ -1334,7 +1607,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
         {/* Attendance Table */}
         <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
-          {filterMode === 'monthly' && monthlyViewMode === 'summary' ? (
+          {(filterMode === 'monthly' || filterMode === 'range') && monthlyViewMode === 'summary' ? (
             /* Monthly Per-Student Summary Table */
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 uppercase tracking-wider text-[10px] font-bold border-b border-slate-200 dark:border-slate-700">

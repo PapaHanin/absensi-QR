@@ -304,6 +304,7 @@ export interface MonthlyStudentRecapItem {
   alpa: number;
   totalHadir: number;
   percentage: number;
+  totalHari?: number;
 }
 
 export interface MonthlyPDFReportOptions {
@@ -322,6 +323,13 @@ export interface MonthlyPDFReportOptions {
   };
   signatureDate?: string;
   directPrint?: boolean;
+  subjectInfo?: {
+    teacherName?: string;
+    teacherNip?: string;
+    subjectName?: string;
+  };
+  reportType?: 'wali_kelas' | 'guru_mapel' | 'admin';
+  totalEffectiveDays?: number;
 }
 
 /**
@@ -337,6 +345,9 @@ export const generateMonthlyAttendancePDFReport = ({
   headmaster,
   signatureDate,
   directPrint = false,
+  subjectInfo,
+  reportType = 'wali_kelas',
+  totalEffectiveDays,
 }: MonthlyPDFReportOptions) => {
   const doc = new jsPDF({
     orientation: 'landscape',
@@ -357,21 +368,23 @@ export const generateMonthlyAttendancePDFReport = ({
 
   doc.setFontSize(9.5);
   doc.setFont('helvetica', 'normal');
-  doc.text(
-    `LAPORAN REKAPITULASI PRESENSI BULANAN SISWA - TAHUN AJARAN ${settings.academicYear}`,
-    pageWidth / 2,
-    15,
-    { align: 'center' }
-  );
+  const mainTitle =
+    reportType === 'guru_mapel' && subjectInfo?.subjectName
+      ? `LAPORAN REKAPITULASI PRESENSI MAPEL ${subjectInfo.subjectName.toUpperCase()} - TA ${settings.academicYear}`
+      : reportType === 'wali_kelas'
+      ? `LAPORAN REKAPITULASI PRESENSI KELAS ${selectedClass} (WALI KELAS & MAPEL) - TA ${settings.academicYear}`
+      : `LAPORAN REKAPITULASI PRESENSI SISWA - TAHUN AJARAN ${settings.academicYear}`;
+  doc.text(mainTitle, pageWidth / 2, 15, { align: 'center' });
 
   doc.setFontSize(8);
   doc.setTextColor(203, 213, 225); // slate-300
-  doc.text(
-    settings.schoolAddress || 'Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi Republik Indonesia',
-    pageWidth / 2,
-    20,
-    { align: 'center' }
-  );
+  const subTitle =
+    reportType === 'guru_mapel' && subjectInfo
+      ? `Guru Pengampu: ${subjectInfo.teacherName || '-'} | NIP: ${formatCleanNIP(subjectInfo.teacherNip)}`
+      : reportType === 'wali_kelas'
+      ? `Rekapitulasi Terpadu Kehadiran Kelas ${selectedClass} (Presensi Wali Kelas & Guru Mata Pelajaran)`
+      : settings.schoolAddress || 'Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi Republik Indonesia';
+  doc.text(subTitle, pageWidth / 2, 20, { align: 'center' });
 
   // Metadata Box
   doc.setTextColor(30, 41, 59);
@@ -380,8 +393,9 @@ export const generateMonthlyAttendancePDFReport = ({
 
   const startY = 30;
   doc.text(`Bulan / Periode : ${monthLabel}`, 14, startY);
-  doc.text(`Kelas : ${selectedClass === 'Semua' ? 'Semua Kelas' : selectedClass}`, 14, startY + 5);
-  doc.text(`Total Siswa : ${recaps.length} Siswa`, 14, startY + 10);
+  doc.text(`Kelas : ${selectedClass === 'Semua' ? 'Semua Kelas' : `Kelas ${selectedClass}`}`, 14, startY + 5);
+  const effectiveDaysStr = totalEffectiveDays ? `${totalEffectiveDays} Hari Efektif` : `${recaps[0]?.totalHari || '-'} Hari Efektif`;
+  doc.text(`Total Siswa : ${recaps.length} Siswa | ${effectiveDaysStr}`, 14, startY + 10);
 
   // Totals calculations
   const totalHadir = recaps.reduce((sum, r) => sum + r.hadir, 0);
@@ -437,6 +451,11 @@ export const generateMonthlyAttendancePDFReport = ({
     `${r.percentage}%`,
   ]);
 
+  const avgPercentage =
+    recaps.length > 0
+      ? Math.round(recaps.reduce((sum, r) => sum + r.percentage, 0) / recaps.length)
+      : 0;
+
   // Append Total Row
   tableRows.push([
     '',
@@ -450,7 +469,7 @@ export const generateMonthlyAttendancePDFReport = ({
     `${totalIzin} hr`,
     `${totalAlpa} hr`,
     `${totalHadir + totalTerlambat} hr`,
-    '-',
+    `${avgPercentage}%`,
   ]);
 
   autoTable(doc, {
@@ -536,28 +555,36 @@ export const generateMonthlyAttendancePDFReport = ({
   const city = settings.schoolCity || 'Kota';
   const locationDateStr = `${city}, ${dateFormatted}`;
 
-  // Left column: Wali Kelas
+  // Left column: Wali Kelas / Guru Mapel
   const leftX = 25;
-  const waliTitle =
-    homeroomTeacher?.classLabel ||
-    (selectedClass !== 'Semua' ? `Wali Kelas ${selectedClass}` : 'Wali Kelas / Koordinator Presensi');
-  const waliName = homeroomTeacher?.name?.trim() || '( ........................................ )';
-  const waliNip = formatCleanNIP(homeroomTeacher?.nip);
+  const signerTitle =
+    reportType === 'guru_mapel' && subjectInfo
+      ? `Guru Mapel ${subjectInfo.subjectName || ''}`
+      : homeroomTeacher?.classLabel ||
+        (selectedClass !== 'Semua' ? `Wali Kelas ${selectedClass}` : 'Wali Kelas / Koordinator Presensi');
+  const signerName =
+    reportType === 'guru_mapel' && subjectInfo
+      ? subjectInfo.teacherName || '( ........................................ )'
+      : homeroomTeacher?.name?.trim() || '( ........................................ )';
+  const signerNip =
+    reportType === 'guru_mapel' && subjectInfo
+      ? formatCleanNIP(subjectInfo.teacherNip)
+      : formatCleanNIP(homeroomTeacher?.nip);
 
   doc.setFont('helvetica', 'normal');
   doc.text('Mengetahui,', leftX, sigY + 4);
   doc.setFont('helvetica', 'bold');
-  doc.text(waliTitle, leftX, sigY + 9);
+  doc.text(signerTitle, leftX, sigY + 9);
 
   doc.setFont('helvetica', 'bold');
-  doc.text(waliName, leftX, sigY + 30);
-  const waliTextWidth = Math.max(doc.getTextWidth(waliName), 50);
+  doc.text(signerName, leftX, sigY + 30);
+  const signerTextWidth = Math.max(doc.getTextWidth(signerName), 50);
   doc.setDrawColor(71, 85, 105);
   doc.setLineWidth(0.4);
-  doc.line(leftX, sigY + 31, leftX + waliTextWidth, sigY + 31);
+  doc.line(leftX, sigY + 31, leftX + signerTextWidth, sigY + 31);
 
   doc.setFont('helvetica', 'normal');
-  doc.text(waliNip, leftX, sigY + 36);
+  doc.text(signerNip, leftX, sigY + 36);
 
   // Right column: Kepala Sekolah
   const sigRightX = pageWidth - 90;

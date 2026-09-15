@@ -175,6 +175,13 @@ export interface MonthlyRecapCSVExportOptions {
   };
   signatureDate?: string;
   filename?: string;
+  subjectInfo?: {
+    teacherName?: string;
+    teacherNip?: string;
+    subjectName?: string;
+  };
+  reportType?: 'wali_kelas' | 'guru_mapel' | 'admin';
+  totalEffectiveDays?: number;
 }
 
 /**
@@ -189,6 +196,9 @@ export const exportMonthlyRecapToCSV = ({
   headmaster,
   signatureDate,
   filename,
+  subjectInfo,
+  reportType = 'wali_kelas',
+  totalEffectiveDays,
 }: MonthlyRecapCSVExportOptions) => {
   if (!recaps || recaps.length === 0) {
     alert('Tidak ada data siswa untuk diekspor ke rekap bulanan.');
@@ -199,11 +209,23 @@ export const exportMonthlyRecapToCSV = ({
 
   // Kop Header
   lines.push(`"${settings.schoolName.toUpperCase()}"`);
-  lines.push(`"LAPORAN REKAPITULASI PRESENSI BULANAN SISWA"`);
+  if (reportType === 'guru_mapel' && subjectInfo) {
+    lines.push(`"LAPORAN REKAPITULASI PRESENSI MAPEL ${subjectInfo.subjectName?.toUpperCase() || 'MATA PELAJARAN'}"`);
+    lines.push(`"Guru Pengampu:","${subjectInfo.teacherName || '-'}"`);
+    lines.push(`"NIP:","${formatCleanNIP(subjectInfo.teacherNip)}"`);
+  } else if (reportType === 'wali_kelas') {
+    lines.push(`"LAPORAN REKAPITULASI PRESENSI SISWA KELAS ${selectedClass}"`);
+    lines.push(`"Keterangan:","Rekapitulasi Terpadu Presensi Wali Kelas & Guru Mapel"`);
+  } else {
+    lines.push(`"LAPORAN REKAPITULASI PRESENSI SISWA"`);
+  }
   lines.push(`"Tahun Ajaran:","${settings.academicYear}"`);
-  lines.push(`"Bulan:","${monthLabel}"`);
-  lines.push(`"Kelas:","${selectedClass}"`);
+  lines.push(`"Bulan / Periode:","${monthLabel}"`);
+  lines.push(`"Kelas:","${selectedClass === 'Semua' ? 'Semua Kelas' : `Kelas ${selectedClass}`}"`);
   lines.push(`"Total Siswa:","${recaps.length} Siswa"`);
+  if (totalEffectiveDays) {
+    lines.push(`"Hari Efektif:","${totalEffectiveDays} Hari"`);
+  }
   lines.push('""');
 
   // Columns
@@ -281,9 +303,19 @@ export const exportMonthlyRecapToCSV = ({
     year: 'numeric',
   });
   const city = settings.schoolCity || 'Kota';
-  const waliTitle = homeroomTeacher?.classLabel || (selectedClass !== 'Semua' ? `Wali Kelas ${selectedClass}` : 'Wali Kelas / Koordinator');
-  const waliName = homeroomTeacher?.name?.trim() || '( ........................................ )';
-  const waliNip = formatCleanNIP(homeroomTeacher?.nip);
+  const signerTitle =
+    reportType === 'guru_mapel' && subjectInfo
+      ? `Guru Mapel ${subjectInfo.subjectName || ''}`
+      : homeroomTeacher?.classLabel ||
+        (selectedClass !== 'Semua' ? `Wali Kelas ${selectedClass}` : 'Wali Kelas / Koordinator');
+  const signerName =
+    reportType === 'guru_mapel' && subjectInfo
+      ? subjectInfo.teacherName || '( ........................................ )'
+      : homeroomTeacher?.name?.trim() || '( ........................................ )';
+  const signerNip =
+    reportType === 'guru_mapel' && subjectInfo
+      ? formatCleanNIP(subjectInfo.teacherNip)
+      : formatCleanNIP(homeroomTeacher?.nip);
 
   const headName = headmaster?.name?.trim() || settings.headmasterName?.trim() || '( ........................................ )';
   const headNip = formatCleanNIP(headmaster?.nip || settings.headmasterNip);
@@ -291,12 +323,12 @@ export const exportMonthlyRecapToCSV = ({
   lines.push('""');
   lines.push('""');
   lines.push(`"","Mengetahui,","","","","","${city}, ${dateFormatted}"`);
-  lines.push(`"","${waliTitle}","","","","","Mengetahui,"`);
+  lines.push(`"","${signerTitle}","","","","","Mengetahui,"`);
   lines.push(`"","","","","","","Kepala Sekolah"`);
   lines.push('""');
   lines.push('""');
-  lines.push(`"","${waliName}","","","","","${headName}"`);
-  lines.push(`"","${waliNip}","","","","","${headNip}"`);
+  lines.push(`"","${signerName}","","","","","${headName}"`);
+  lines.push(`"","${signerNip}","","","","","${headNip}"`);
 
   const safeSchool = settings.schoolName.replace(/[\s\/\\]+/g, '_');
   const safeMonth = monthLabel.replace(/[\s\/\\]+/g, '_');
