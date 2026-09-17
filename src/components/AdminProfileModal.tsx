@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Teacher, SystemSettings } from '../types';
 import { HeadmasterBarcode, HEADMASTER_DEFAULT_BARCODE_DATA_URI } from '../utils/headmasterBarcode';
 
@@ -17,6 +17,17 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({
   onUpdateSettings,
   onClose,
 }) => {
+  // Close with Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   // Admin Data Form
   const [name, setName] = useState(currentTeacher.name);
   const [nip, setNip] = useState(currentTeacher.nip || '');
@@ -71,30 +82,42 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white border border-slate-200 rounded-3xl max-w-xl w-full p-6 shadow-2xl relative my-8 animate-scale-up space-y-5">
-        <button
-          onClick={onClose}
-          className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 p-2 cursor-pointer rounded-full hover:bg-slate-100 transition-colors"
-        >
-          <i className="fa-solid fa-xmark text-lg"></i>
-        </button>
-
-        {/* Modal Header */}
-        <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
-          <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center text-xl font-bold">
-            <i className="fa-solid fa-user-gear"></i>
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-hidden"
+    >
+      <div className="bg-white border border-slate-200 rounded-3xl max-w-xl w-full max-h-[92vh] shadow-2xl relative flex flex-col animate-scale-up overflow-hidden my-auto">
+        {/* Sticky Header with prominent X button */}
+        <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-md px-5 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center text-lg font-bold shrink-0">
+              <i className="fa-solid fa-user-gear"></i>
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-base sm:text-lg font-extrabold text-slate-900 truncate">
+                Edit Profil Admin & Identitas Sekolah
+              </h3>
+              <p className="text-[11px] sm:text-xs text-slate-500 truncate">
+                Ubah nama sekolah, alamat, semester, data kepala sekolah & admin
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-lg font-extrabold text-slate-900">Edit Profil Admin & Identitas Sekolah</h3>
-            <p className="text-xs text-slate-500">
-              Ganti data default menjadi identitas asli Anda dan sekolah tujuan sebelum digunakan/dijual.
-            </p>
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 flex items-center justify-center cursor-pointer transition-all shrink-0 shadow-xs border border-slate-200"
+            title="Tutup Jendela (Esc)"
+          >
+            <i className="fa-solid fa-xmark text-base"></i>
+          </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Section 1: Profil Pribadi Admin */}
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+          {/* Scrollable Content Body */}
+          <div className="overflow-y-auto p-4 sm:p-6 space-y-4 flex-1">
+            {/* Section 1: Profil Pribadi Admin */}
           <div className="bg-amber-50/60 border border-amber-200 p-4 rounded-2xl space-y-3">
             <h4 className="text-xs font-black text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
               <i className="fa-solid fa-shield-halved text-amber-700"></i>
@@ -450,19 +473,21 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({
               </div>
             </div>
           </div>
+        </div>
 
-          <div className="flex gap-2 pt-2">
+          {/* Sticky Footer */}
+          <div className="sticky bottom-0 z-10 bg-slate-50/95 backdrop-blur-xs px-5 sm:px-6 py-3.5 border-t border-slate-200 flex gap-2 shrink-0">
             <button
               type="submit"
-              className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
+              className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
             >
               <i className="fa-solid fa-check"></i>
-              <span>Simpan Profil Admin & Data Sekolah</span>
+              <span>Simpan Profil & Data Sekolah</span>
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+              className="px-5 py-2.5 bg-slate-200 hover:bg-slate-300 active:scale-98 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
             >
               Tutup
             </button>

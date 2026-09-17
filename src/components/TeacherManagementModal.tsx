@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Teacher, TeacherType } from '../types';
 import { SD_CLASSES } from '../data/initialData';
 
@@ -28,6 +28,17 @@ export const TeacherManagementModal: React.FC<TeacherManagementModalProps> = ({
   const [homeroomClass, setHomeroomClass] = useState<string>('Kelas 1');
   const [searchQuery, setSearchQuery] = useState('');
   const [teacherToDelete, setTeacherToDelete] = useState<Teacher | null>(null);
+
+  // Close with Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   // Start editing a specific teacher / admin
   const handleStartEdit = (teacher: Teacher) => {
@@ -122,32 +133,43 @@ export const TeacherManagementModal: React.FC<TeacherManagementModalProps> = ({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full p-6 shadow-2xl relative my-8 animate-scale-up space-y-6">
-        <button
-          onClick={onClose}
-          className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 p-2 cursor-pointer rounded-full hover:bg-slate-100 transition-colors"
-        >
-          <i className="fa-solid fa-xmark text-lg"></i>
-        </button>
-
-        <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
-          <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-lg">
-            <i className="fa-solid fa-users-gear"></i>
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-hidden"
+    >
+      <div className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full max-h-[92vh] shadow-2xl relative flex flex-col animate-scale-up overflow-hidden my-auto">
+        {/* Sticky Header with prominent X button */}
+        <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-md px-5 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-lg shrink-0">
+              <i className="fa-solid fa-users-gear"></i>
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-base sm:text-lg font-extrabold text-slate-900 truncate">
+                Kelola Akun Guru & Pengguna
+              </h3>
+              <p className="text-[11px] sm:text-xs text-slate-500 truncate">
+                Tambah guru baru, atur wali kelas, atau perbarui data profil akun
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-lg font-extrabold text-slate-900">
-              Kelola & Edit Akun Admin / Guru Mapel
-            </h3>
-            <p className="text-xs text-slate-500">
-              Ubah data profil Anda (Admin) atau tambahkan dan perbarui akun guru mata pelajaran.
-            </p>
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 flex items-center justify-center cursor-pointer transition-all shrink-0 shadow-xs border border-slate-200"
+            title="Tutup Jendela (Esc)"
+          >
+            <i className="fa-solid fa-xmark text-base"></i>
+          </button>
         </div>
 
-        {/* Form Tambah / Edit Guru & Admin */}
-        <form
-          onSubmit={handleSubmit}
+        {/* Scrollable Content Body */}
+        <div className="overflow-y-auto p-4 sm:p-6 space-y-6 flex-1">
+          {/* Form Tambah / Edit Guru & Admin */}
+          <form
+            onSubmit={handleSubmit}
           className={`p-4 rounded-2xl border transition-all space-y-3 ${
             editingTeacherId
               ? 'bg-amber-50/80 border-amber-300 ring-2 ring-amber-200/50'
@@ -490,6 +512,22 @@ export const TeacherManagementModal: React.FC<TeacherManagementModalProps> = ({
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+        {/* Sticky Footer with Close Button */}
+        <div className="sticky bottom-0 z-10 bg-slate-50/95 backdrop-blur-xs px-5 sm:px-6 py-3 border-t border-slate-200 flex items-center justify-between shrink-0">
+          <span className="text-xs text-slate-500 font-medium">
+            Total terdaftar: <strong className="text-slate-800">{teachers.length} akun</strong>
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl cursor-pointer shadow-sm transition-all flex items-center gap-2 active:scale-95"
+          >
+            <i className="fa-solid fa-xmark"></i>
+            <span>Tutup Jendela</span>
+          </button>
         </div>
 
         {/* Confirmation Modal for Delete Teacher */}
