@@ -125,28 +125,4 @@ export interface BehaviorLog {
   createdAt: string;
 }
 
-export interface ERaporKehadiran {
-  sakit: number;
-  izin: number;
-  tanpaKeterangan: number;
-}
-
-export interface ERaporRecapDoc {
-  nisn: string;
-  namaSiswa: string;
-  kelas: string;
-  semester: number; // 1 | 2
-  tahunAjaran: string; // e.g. "2024/2025"
-  sakit: number;
-  izin: number;
-  tanpaKeterangan: number;
-  kehadiran: ERaporKehadiran;
-  updatedAt: string; // ISO_TIMESTAMP
-  tipePeriode?: 'semester' | 'bulanan' | 'rentang_tanggal';
-  periodeLabel?: string;
-  tanggalMulai?: string;
-  tanggalSelesai?: string;
-  bulan?: string;
-}
-
 

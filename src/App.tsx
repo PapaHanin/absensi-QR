@@ -27,10 +27,8 @@ import { SimulatorTab } from './components/SimulatorTab';
 import { LoginModal } from './components/LoginModal';
 import { TeacherManagementModal } from './components/TeacherManagementModal';
 import { AdminProfileModal } from './components/AdminProfileModal';
-import { GuideModal } from './components/GuideModal';
 import { CloudSyncModal } from './components/CloudSyncModal';
 import { DapodikAnnouncementModal, CURRENT_ANNOUNCEMENT_VERSION } from './components/DapodikAnnouncementModal';
-import { ERaporSyncModal } from './components/ERaporSyncModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { testFirestoreConnection } from './firebase';
 import {
@@ -203,9 +201,7 @@ export default function App() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isTeacherModalOpen, setIsTeacherModalOpen] = useState(false);
   const [isAdminProfileModalOpen, setIsAdminProfileModalOpen] = useState(false);
-  const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
   const [isCloudSyncModalOpen, setIsCloudSyncModalOpen] = useState(false);
-  const [isERaporSyncModalOpen, setIsERaporSyncModalOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   // Dapodik-style Announcement Pop-up on initial enter
@@ -943,10 +939,8 @@ export default function App() {
           onLogout={handleTeacherLogout}
           onOpenTeacherManage={() => setIsTeacherModalOpen(true)}
           onOpenAdminProfile={() => setIsAdminProfileModalOpen(true)}
-          onOpenGuide={() => setIsGuideModalOpen(true)}
           onOpenCloudSync={() => setIsCloudSyncModalOpen(true)}
           onOpenAnnouncement={handleOpenAnnouncement}
-          onOpenERaporSync={() => setIsERaporSyncModalOpen(true)}
           isOpenMobile={isMobileSidebarOpen}
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
         />
@@ -984,7 +978,6 @@ export default function App() {
                 onDeleteLeave={handleDeleteLeave}
                 onSaveBehaviorLog={handleSaveBehaviorLog}
                 onDeleteBehaviorLog={handleDeleteBehaviorLog}
-                onOpenERaporSync={() => setIsERaporSyncModalOpen(true)}
               />
             </ErrorBoundary>
           )}
@@ -1024,7 +1017,6 @@ export default function App() {
                 onDeleteLeave={handleDeleteLeave}
                 onSaveBehaviorLog={handleSaveBehaviorLog}
                 onDeleteBehaviorLog={handleDeleteBehaviorLog}
-                onOpenERaporSync={() => setIsERaporSyncModalOpen(true)}
                 onUpdateSettings={handleUpdateSettings}
               />
             </ErrorBoundary>
@@ -1083,14 +1075,6 @@ export default function App() {
           />
         )}
 
-        {/* Guide Modal for Teachers & Selling app */}
-        {isGuideModalOpen && (
-          <GuideModal
-            onClose={() => setIsGuideModalOpen(false)}
-            onOpenCloudSync={() => setIsCloudSyncModalOpen(true)}
-          />
-        )}
-
         {/* Cloud Sync & Export Modal */}
         {isCloudSyncModalOpen && (
           <CloudSyncModal
@@ -1115,20 +1099,6 @@ export default function App() {
             onNavigateToSettings={() => {
               setActiveTab('simulator');
             }}
-          />
-        )}
-
-        {/* e-Rapor Merdeka Semester Recap Synchronization Modal (iihh Beres) */}
-        {isERaporSyncModalOpen && (
-          <ERaporSyncModal
-            isOpen={isERaporSyncModalOpen}
-            onClose={() => setIsERaporSyncModalOpen(false)}
-            students={students}
-            attendanceRecords={attendanceRecords}
-            scheduledLeaves={scheduledLeaves}
-            settings={settings}
-            currentTeacher={currentTeacher}
-            onSuccessToast={(title, msg) => addToast(title, msg, 'success')}
           />
         )}
 

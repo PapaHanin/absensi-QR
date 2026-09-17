@@ -40,37 +40,6 @@ try {
 export const db = firestoreInstance;
 export const auth = getAuth(app);
 
-// Target Database ID for e-Rapor Merdeka (iihh Beres)
-export const IIHH_BERES_DATABASE_ID = 'ai-studio-iihhberes-db02674d-a027-43d4-b17e-50573c47075a';
-
-// Target Firestore instance for e-Rapor Merdeka (iihh Beres) - lazy initialization to prevent startup errors
-let _iihhBeresInstance: any = null;
-export function getIihhBeresDb() {
-  if (!_iihhBeresInstance) {
-    try {
-      _iihhBeresInstance = initializeFirestore(
-        app,
-        {
-          experimentalForceLongPolling: true,
-          ignoreUndefinedProperties: true,
-        },
-        IIHH_BERES_DATABASE_ID
-      );
-    } catch {
-      _iihhBeresInstance = getFirestore(app, IIHH_BERES_DATABASE_ID);
-    }
-  }
-  return _iihhBeresInstance;
-}
-
-// Backward-compatible getter
-export const iihhBeresDb = new Proxy({} as any, {
-  get(_target, prop) {
-    const instance = getIihhBeresDb();
-    return (instance as any)[prop];
-  },
-});
-
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',

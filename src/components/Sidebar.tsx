@@ -12,9 +12,7 @@ interface SidebarProps {
   onOpenTeacherManage: () => void;
   onOpenCloudSync: () => void;
   onOpenAdminProfile?: () => void;
-  onOpenGuide?: () => void;
   onOpenAnnouncement?: () => void;
-  onOpenERaporSync?: () => void;
   isOpenMobile?: boolean;
   onCloseMobile?: () => void;
 }
@@ -30,35 +28,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenTeacherManage,
   onOpenCloudSync,
   onOpenAdminProfile,
-  onOpenGuide,
   onOpenAnnouncement,
-  onOpenERaporSync,
   isOpenMobile = false,
   onCloseMobile,
 }) => {
   const navItems = [
     {
       id: 'dashboard' as ActiveTab,
-      label: 'Dashboard & Rekap',
+      label: 'DASHBOARD & REKAP',
       icon: 'fa-solid fa-chart-pie',
       badge: null,
     },
     {
       id: 'scanner' as ActiveTab,
-      label: 'Scan QR Kamera',
-      icon: 'fa-solid fa-camera',
+      label: 'SCAN QR ABSENSI',
+      icon: 'fa-solid fa-qrcode',
       badge: 'LIVE',
       badgeClass: 'bg-rose-500 text-white animate-pulse',
     },
     {
       id: 'students' as ActiveTab,
-      label: 'Data Siswa & Kartu',
+      label: 'DATA SISWA & KARTU',
       icon: 'fa-solid fa-id-card',
       badge: null,
     },
     {
       id: 'simulator' as ActiveTab,
-      label: 'Pengaturan & Simulasi',
+      label: 'PENGATURAN',
       icon: 'fa-solid fa-sliders',
       badge: null,
     },
@@ -74,7 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const sidebarContent = (
     <div className="flex flex-col h-full justify-between p-4 sm:p-5 text-rose-100">
       {/* Top: School Brand Identity */}
-      <div className="space-y-6">
+      <div className="space-y-5">
         <div className="flex items-center justify-between gap-3 pb-4 border-b border-[#5e0d16] dark:border-[#380509]">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-600 to-rose-900 border border-rose-500/30 flex items-center justify-center text-white font-bold text-lg shadow-md shadow-red-950/50 shrink-0">
@@ -95,45 +91,66 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
 
-          {/* Close button for Mobile Drawer */}
-          {onCloseMobile && (
-            <button
-              type="button"
-              onClick={onCloseMobile}
-              className="md:hidden p-1.5 rounded-lg text-rose-300 hover:text-white hover:bg-[#48080f] transition-colors"
-              title="Tutup Menu"
-            >
-              <i className="fa-solid fa-xmark text-lg"></i>
-            </button>
-          )}
+          <div className="flex items-center gap-1">
+            {/* Announcement Bell (Opens single system notification modal) */}
+            {onOpenAnnouncement && (
+              <button
+                type="button"
+                onClick={onOpenAnnouncement}
+                className="p-1.5 rounded-lg text-rose-300 hover:text-amber-300 hover:bg-[#48080f] transition-colors relative"
+                title="Pemberitahuan Sistem"
+              >
+                <i className="fa-solid fa-bell text-sm"></i>
+                {(settings.announcementTitle || settings.announcementContent) && (
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                )}
+              </button>
+            )}
+
+            {/* Close button for Mobile Drawer */}
+            {onCloseMobile && (
+              <button
+                type="button"
+                onClick={onCloseMobile}
+                className="md:hidden p-1.5 rounded-lg text-rose-300 hover:text-white hover:bg-[#48080f] transition-colors"
+                title="Tutup Menu"
+              >
+                <i className="fa-solid fa-xmark text-lg"></i>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Section: Menu Navigasi Utama */}
         <div>
-          <div className="text-[10px] font-extrabold uppercase tracking-wider text-rose-300/60 mb-2 px-3">
+          <div className="text-[10px] font-black uppercase tracking-wider text-rose-300/60 mb-2 px-3">
             Menu Navigasi
           </div>
           <nav className="space-y-1.5">
+            {/* 1. DASHBOARD & REKAP */}
+            {/* 2. SCAN QR ABSENSI */}
+            {/* 3. DATA SISWA & KARTU */}
+            {/* 4. PENGATURAN */}
             {navItems.map((item) => {
               const isActive = activeTab === item.id;
               return (
-                <React.Fragment key={item.id}>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectTab(item.id)}
-                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                      isActive
-                        ? 'bg-gradient-to-r from-red-700 to-rose-800 text-white shadow-sm shadow-red-950/40 border border-red-500/30'
-                        : 'text-rose-200 hover:bg-[#45070d] hover:text-white'
-                    }`}
-                  >
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleSelectTab(item.id)}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-gradient-to-r from-red-700 to-rose-800 text-white shadow-sm shadow-red-950/40 border border-red-500/30'
+                      : 'text-rose-200 hover:bg-[#45070d] hover:text-white'
+                  }`}
+                >
                   <div className="flex items-center gap-3">
                     <i
                       className={`${item.icon} text-sm w-4 text-center ${
                         isActive ? 'text-white' : 'text-rose-300/70'
                       }`}
                     ></i>
-                    <span>{item.label}</span>
+                    <span className="tracking-wide uppercase">{item.label}</span>
                   </div>
 
                   <div className="flex items-center gap-1.5">
@@ -155,119 +172,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                   </div>
                 </button>
-                {item.id === 'students' && onOpenERaporSync && (
-                  <div className="pt-1 pb-0.5 px-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onOpenERaporSync();
-                        if (onCloseMobile) onCloseMobile();
-                      }}
-                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-200 border border-emerald-500/30 hover:border-emerald-400/50 shadow-xs group cursor-pointer"
-                      title="Kirim Rekap Kehadiran Semester Siswa ke e-Rapor Merdeka (iihh Beres)"
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="w-5 h-5 rounded-lg bg-emerald-500/20 text-emerald-300 flex items-center justify-center text-[10px] group-hover:scale-110 transition-transform shrink-0">
-                          <i className="fa-solid fa-cloud-arrow-up"></i>
-                        </div>
-                        <span className="truncate text-[11px]">Kirim Rekap ke e-Rapor</span>
-                      </div>
-                      <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 shrink-0">
-                        e-Rapor
-                      </span>
-                    </button>
+              );
+            })}
+
+            {/* 5. SINKRON DATA (WAJIB TIAP HARI SELESAI ABSEN) */}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenCloudSync();
+                  if (onCloseMobile) onCloseMobile();
+                }}
+                className="w-full flex flex-col p-3 rounded-2xl text-left font-bold transition-all cursor-pointer bg-gradient-to-r from-[#4d0910] via-[#5c0d16] to-[#48080f] hover:from-[#5e0e18] hover:to-[#550a11] border border-rose-500/40 hover:border-rose-400 text-white shadow-md shadow-red-950/50 group"
+                title="Sinkronisasi Data Presensi Harian ke Cloud Firebase (Wajib Tiap Hari Selesai Absen)"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-xl bg-rose-500/20 text-rose-300 flex items-center justify-center text-xs group-hover:scale-110 transition-transform shrink-0 border border-rose-400/30">
+                      <i className="fa-solid fa-cloud-arrow-up animate-pulse text-amber-300"></i>
+                    </div>
+                    <span className="text-xs font-black tracking-wide uppercase text-white truncate">
+                      SINKRON DATA
+                    </span>
                   </div>
-                )}
-              </React.Fragment>
-            );
-          })}
-          </nav>
-        </div>
-
-        {/* Section: Bantuan & Utilitas */}
-        <div>
-          <div className="text-[10px] font-extrabold uppercase tracking-wider text-rose-300/60 mb-2 px-3">
-            Utilitas & Panduan
-          </div>
-          <div className="space-y-1.5">
-            {onOpenGuide && (
-              <button
-                type="button"
-                onClick={() => {
-                  onOpenGuide();
-                  if (onCloseMobile) onCloseMobile();
-                }}
-                className="w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-800/60 transition-colors cursor-pointer"
-              >
-                <i className="fa-solid fa-mobile-screen-button text-emerald-400 text-sm w-4 text-center"></i>
-                <span className="truncate">Panduan HP Guru</span>
-              </button>
-            )}
-
-            {onOpenAnnouncement && (
-              <button
-                type="button"
-                onClick={() => {
-                  onOpenAnnouncement();
-                  if (onCloseMobile) onCloseMobile();
-                }}
-                className={`w-full flex items-center justify-between px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                  currentTeacher?.role === 'admin'
-                    ? 'text-amber-200 bg-amber-950/60 hover:bg-amber-900/60 border border-amber-800/60'
-                    : 'text-rose-200 bg-[#42070e]/80 hover:bg-[#520a12] border border-[#660f1a]/70'
-                }`}
-                title={
-                  currentTeacher?.role === 'admin'
-                    ? 'Pemberitahuan Sistem (Mode Admin: Dapat Mengedit)'
-                    : 'Pemberitahuan Sistem (Mode Guru: Hanya Melihat - Terkunci)'
-                }
-              >
-                <div className="flex items-center gap-3 truncate">
-                  <i
-                    className={`fa-solid fa-bullhorn text-sm w-4 text-center shrink-0 ${
-                      currentTeacher?.role === 'admin' ? 'text-amber-400' : 'text-rose-300'
-                    }`}
-                  ></i>
-                  <span className="truncate">Pemberitahuan Sistem</span>
+                  <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 shrink-0 shadow-2xs">
+                    WAJIB
+                  </span>
                 </div>
-                {currentTeacher?.role === 'admin' ? (
-                  <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-400 text-slate-900 shrink-0 flex items-center gap-1">
-                    <i className="fa-solid fa-pen-to-square text-[8px]"></i>
-                    Admin
-                  </span>
-                ) : (
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-900/80 text-rose-200 border border-rose-700/50 shrink-0 flex items-center gap-1">
-                    <i className="fa-solid fa-lock text-[8px]"></i>
-                    Lihat
-                  </span>
-                )}
+                <div className="text-[10px] text-rose-200/80 mt-1 pl-9 leading-tight font-medium">
+                  (WAJIB TIAP HARI SELESAI ABSEN)
+                </div>
               </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => {
-                onOpenCloudSync();
-                if (onCloseMobile) onCloseMobile();
-              }}
-              className="w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold text-rose-200 bg-[#45070d] hover:bg-[#580d16] border border-[#6b101b] transition-colors cursor-pointer"
-            >
-              <i className="fa-solid fa-cloud-arrow-up text-rose-400 text-sm w-4 text-center"></i>
-              <span className="truncate">Cloud Sync & Backup</span>
-            </button>
-          </div>
+            </div>
+          </nav>
         </div>
       </div>
 
-      {/* Bottom: Data Guru & Profil Pengguna */}
+      {/* 6. DATA GURU & PENGGUNA */}
       <div className="pt-4 border-t border-[#5e0d16] dark:border-[#380509] mt-6">
-        <div className="text-[10px] font-extrabold uppercase tracking-wider text-rose-300/60 mb-2 px-1">
-          Data Guru / Pengguna
+        <div className="text-[10px] font-black uppercase tracking-wider text-rose-300/80 mb-2 px-1 flex items-center justify-between">
+          <span>DATA GURU & PENGGUNA</span>
+          {currentTeacher?.role === 'admin' && (
+            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30">
+              Admin
+            </span>
+          )}
         </div>
 
         {currentTeacher ? (
           <div className="bg-[#3d060a] dark:bg-[#200204] border border-[#610e16] dark:border-[#3d060b] rounded-2xl p-3 shadow-2xs">
-            {/* Teacher Identity */}
+            {/* Teacher Identity Card */}
             <div className="flex items-start gap-2.5">
               <div
                 className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 mt-0.5 ${
@@ -318,20 +272,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {/* Quick Actions for Teacher / Admin */}
             <div className="mt-3 pt-2.5 border-t border-[#5e0d16]/70 dark:border-[#380509] space-y-1">
-              {currentTeacher.role === 'admin' && onOpenAdminProfile && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onOpenAdminProfile();
-                    if (onCloseMobile) onCloseMobile();
-                  }}
-                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#4a080f] text-[11px] font-medium text-rose-200 hover:text-white flex items-center gap-2 transition-colors cursor-pointer"
-                >
-                  <i className="fa-solid fa-school text-rose-400 text-xs w-4"></i>
-                  <span>Edit Profil Sekolah</span>
-                </button>
-              )}
-
               {currentTeacher.role === 'admin' && (
                 <button
                   type="button"
@@ -342,7 +282,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#4a080f] text-[11px] font-medium text-rose-200 hover:text-white flex items-center gap-2 transition-colors cursor-pointer"
                 >
                   <i className="fa-solid fa-users-gear text-rose-400 text-xs w-4"></i>
-                  <span>Kelola Akun Guru</span>
+                  <span>Kelola Akun Guru & Pengguna</span>
+                </button>
+              )}
+
+              {currentTeacher.role === 'admin' && onOpenAdminProfile && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenAdminProfile();
+                    if (onCloseMobile) onCloseMobile();
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#4a080f] text-[11px] font-medium text-rose-200 hover:text-white flex items-center gap-2 transition-colors cursor-pointer"
+                >
+                  <i className="fa-solid fa-school text-rose-400 text-xs w-4"></i>
+                  <span>Profil Sekolah & Kepala Sekolah</span>
                 </button>
               )}
 
@@ -381,7 +335,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className="w-full py-2 px-3 bg-gradient-to-r from-red-700 to-rose-800 hover:from-red-600 hover:to-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <i className="fa-solid fa-right-to-bracket text-xs"></i>
-              <span>Login Akun Guru</span>
+              <span>Login Akun Guru & Pengguna</span>
             </button>
           </div>
         )}
@@ -429,7 +383,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 }`}
               >
                 <i className={`${item.icon} text-sm mb-0.5 ${isActive ? 'text-white' : 'text-rose-400'}`}></i>
-                <span className="text-[10px] truncate max-w-full">{item.label.split(' ')[0]}</span>
+                <span className="text-[9px] font-bold truncate max-w-full tracking-tighter">
+                  {item.id === 'scanner' ? 'SCAN QR' : item.label.split(' ')[0]}
+                </span>
               </button>
             );
           })}

@@ -491,6 +491,28 @@ export const SimulatorTab: React.FC<SimulatorTabProps> = ({
                           }`}
                         ></textarea>
                       </div>
+                      {isAdmin && (announcementTitle || announcementContent) && (
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-[11px] text-slate-500">Ada 1 pemberitahuan aktif</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAnnouncementTitle('');
+                              setAnnouncementContent('');
+                              onUpdateSettings({
+                                ...settings,
+                                announcementTitle: '',
+                                announcementContent: '',
+                                announcementDate: '',
+                              });
+                            }}
+                            className="text-xs text-rose-600 dark:text-rose-400 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                          >
+                            <i className="fa-solid fa-trash-can text-[10px]"></i>
+                            <span>Kosongkan / Hapus Notif Ini</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

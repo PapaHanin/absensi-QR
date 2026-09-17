@@ -31,7 +31,6 @@ interface StudentsTabProps {
   onDeleteLeave?: (leaveId: string) => void;
   onSaveBehaviorLog?: (log: BehaviorLog) => void;
   onDeleteBehaviorLog?: (logId: string) => void;
-  onOpenERaporSync?: () => void;
   onUpdateSettings?: (settings: SystemSettings) => void;
 }
 
@@ -51,7 +50,6 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
   onDeleteLeave,
   onSaveBehaviorLog,
   onDeleteBehaviorLog,
-  onOpenERaporSync,
   onUpdateSettings,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -632,18 +630,6 @@ export const StudentsTab: React.FC<StudentsTabProps> = ({
             >
               <i className="fa-solid fa-calendar-days text-xs"></i>
               <span>Izin Terjadwal</span>
-            </button>
-          )}
-
-          {/* Kirim Rekap ke e-Rapor Button */}
-          {onOpenERaporSync && (
-            <button
-              onClick={onOpenERaporSync}
-              className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer border border-emerald-500/40"
-              title="Sinkronisasi Rekap Kehadiran Siswa ke e-Rapor Merdeka (iihh Beres)"
-            >
-              <i className="fa-solid fa-cloud-arrow-up text-xs"></i>
-              <span>Kirim Rekap ke e-Rapor</span>
             </button>
           )}
 
