@@ -1,5 +1,6 @@
 import React from 'react';
 import { ActiveTab, SystemSettings, Teacher } from '../types';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -203,6 +204,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   (WAJIB TIAP HARI SELESAI ABSEN)
                 </div>
               </button>
+
+              {/* Install PWA Button */}
+              <div className="pt-2">
+                <PWAInstallButton variant="sidebar" />
+              </div>
             </div>
           </nav>
         </div>

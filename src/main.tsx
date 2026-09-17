@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './index.css';
+import { registerSW } from 'virtual:pwa-register';
+
+// Register PWA Service Worker for offline support and asset caching
+registerSW({ immediate: true });
 
 // Safely catch benign browser unhandled promise rejections (e.g. Media/Audio autoplay interruptions, iframe navigation)
 if (typeof window !== 'undefined') {

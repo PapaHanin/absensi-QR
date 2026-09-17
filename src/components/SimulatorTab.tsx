@@ -4,6 +4,7 @@ import { SD_CLASSES } from '../data/initialData';
 import { formatClassLabel } from '../utils/classUtils';
 import { HeadmasterBarcode } from '../utils/headmasterBarcode';
 import { CardBrandingModal } from './CardBrandingModal';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface SimulatorTabProps {
   students: Student[];
@@ -104,6 +105,9 @@ export const SimulatorTab: React.FC<SimulatorTabProps> = ({
           Uji coba alur pemindaian cepat serta konfigurasi parameter sistem absensi sekolah.
         </p>
       </div>
+
+      {/* PWA Install Banner */}
+      <PWAInstallButton variant="banner" />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Quick Scan Simulator (2 Cols) */}

@@ -30,6 +30,7 @@ import { AdminProfileModal } from './components/AdminProfileModal';
 import { CloudSyncModal } from './components/CloudSyncModal';
 import { DapodikAnnouncementModal, CURRENT_ANNOUNCEMENT_VERSION } from './components/DapodikAnnouncementModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { testFirestoreConnection } from './firebase';
 import {
   subscribeToStudents,
@@ -956,6 +957,9 @@ export default function App() {
 
           {/* Toast Notifications */}
           <Toast toasts={toasts} onDismiss={dismissToast} />
+
+          {/* Offline Status Indicator */}
+          <OfflineIndicator />
 
           {/* Main Content View */}
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-24 md:pb-12">

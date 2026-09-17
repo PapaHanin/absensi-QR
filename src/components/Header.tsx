@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
   isDarkMode?: boolean;
@@ -60,8 +61,9 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Right: ONLY Dark/Light Mode Toggle Icon */}
-        <div className="flex items-center">
+        {/* Right: PWA Install Button & Dark/Light Mode Toggle */}
+        <div className="flex items-center gap-2">
+          <PWAInstallButton variant="compact" />
           {onToggleDarkMode && (
             <button
               type="button"
